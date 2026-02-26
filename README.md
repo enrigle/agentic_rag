@@ -43,7 +43,7 @@ ollama serve
 ## Run
 
 ```bash
-uv run python test.py
+uv run python main.py
 ```
 
 Expected output:
