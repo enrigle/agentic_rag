@@ -4,7 +4,9 @@ import asyncio
 import time
 from typing import Any, Literal, TypedDict
 
+import chromadb
 import ollama
+from duckduckgo_search import DDGS
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.checkpoint.memory import MemorySaver
@@ -33,10 +35,14 @@ class AgenticRAGSystem:
         self,
         model: str = "llama3.2",
         max_tool_calls: int = 5,
+        chroma_path: str = "./chroma_db",
     ) -> None:
         self.model = model
         self.client = ollama.AsyncClient()
         self.max_tool_calls = max_tool_calls
+        self.embed_model = "nomic-embed-text"
+        self.chroma = chromadb.PersistentClient(path=chroma_path)
+        self.collection = self.chroma.get_or_create_collection("notion_kb")
         self.graph = self._build_graph()
 
     async def _invoke_ollama(self, prompt: str) -> str:
@@ -122,7 +128,7 @@ class AgenticRAGSystem:
             }
 
     async def rag_search(self, state: AgentState) -> AgentState:
-        """Search internal knowledge base (mock implementation)."""
+        """Search internal knowledge base via ChromaDB + Ollama embeddings."""
         if state.get("error"):
             logger.warning(
                 "rag_search: skipping due to prior error: %s", state["error"]
@@ -139,29 +145,38 @@ class AgenticRAGSystem:
             }
 
         try:
-            mock_results: list[dict[str, Any]] = [
+            embed_resp = await self.client.embed(
+                model=self.embed_model, input=state["query"]
+            )
+            query_vec: list[float] = embed_resp["embeddings"][0]
+
+            loop = asyncio.get_running_loop()
+            results: dict[str, Any] = await loop.run_in_executor(
+                None,
+                lambda: self.collection.query(
+                    query_embeddings=[query_vec],
+                    n_results=5,
+                    include=["documents", "distances", "metadatas"],
+                ),
+            )
+
+            rag_results: list[dict[str, Any]] = [
                 {
-                    "source": "kb://internal/api-reference",
-                    "title": "API Reference Guide",
-                    "content": "The /query endpoint accepts POST requests with JSON body {query: str, thread_id: str}.",
-                    "score": 0.95,
-                },
-                {
-                    "source": "kb://internal/architecture",
-                    "title": "System Architecture Overview",
-                    "content": "The agentic RAG system uses LangGraph for orchestration and Ollama for local LLM inference.",
-                    "score": 0.88,
-                },
-                {
-                    "source": "kb://internal/quickstart",
-                    "title": "Developer Quickstart",
-                    "content": "Install with `uv add langgraph ollama`. Run `ollama serve` before starting.",
-                    "score": 0.82,
-                },
+                    "source": meta.get("source", ""),
+                    "title": meta.get("title", ""),
+                    "content": doc,
+                    "score": round(1 - dist, 4),
+                }
+                for doc, dist, meta in zip(
+                    results["documents"][0],
+                    results["distances"][0],
+                    results["metadatas"][0],
+                )
             ]
+            logger.info("rag_search: returned %d results", len(rag_results))
             return {
                 **state,
-                "rag_results": mock_results,
+                "rag_results": rag_results,
                 "tool_calls": state["tool_calls"] + 1,
             }
         except Exception as exc:
@@ -174,7 +189,7 @@ class AgenticRAGSystem:
             }
 
     async def web_search(self, state: AgentState) -> AgentState:
-        """Search external sources (mock implementation)."""
+        """Search the web via DuckDuckGo."""
         if state.get("error"):
             logger.warning(
                 "web_search: skipping due to prior error: %s", state["error"]
@@ -191,23 +206,24 @@ class AgenticRAGSystem:
             }
 
         try:
-            mock_results: list[dict[str, Any]] = [
+            loop = asyncio.get_running_loop()
+            raw: list[dict[str, Any]] = await loop.run_in_executor(
+                None,
+                lambda: DDGS().text(state["query"], max_results=5),
+            )
+            web_results: list[dict[str, Any]] = [
                 {
-                    "source": "https://ollama.com/library/llama3.2",
-                    "title": "Llama 3.2 on Ollama",
-                    "content": "Llama 3.2 is Meta's latest small language model, available locally via Ollama.",
-                    "score": 0.91,
-                },
-                {
-                    "source": "https://langchain-ai.github.io/langgraph/",
-                    "title": "LangGraph Documentation",
-                    "content": "LangGraph is a library for building stateful, multi-actor applications with LLMs.",
-                    "score": 0.87,
-                },
+                    "source": r["href"],
+                    "title": r["title"],
+                    "content": r["body"],
+                    "score": 1.0,
+                }
+                for r in (raw or [])
             ]
+            logger.info("web_search: returned %d results", len(web_results))
             return {
                 **state,
-                "web_results": mock_results,
+                "web_results": web_results,
                 "tool_calls": state["tool_calls"] + 1,
             }
         except Exception as exc:
@@ -327,5 +343,5 @@ class AgenticRAGSystem:
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     system = AgenticRAGSystem()
-    result = asyncio.run(system.query("What is our API endpoint format?"))
+    result = asyncio.run(system.query("How to deploy ML models in web apps?"))
     print(json.dumps(result, indent=2))

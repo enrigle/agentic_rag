@@ -5,6 +5,10 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "chromadb>=1.5.2",
+    "duckduckgo-search>=8.1.1",
     "langgraph>=1.0.9",
+    "notion-client>=3.0.0",
     "ollama>=0.6.1",
+    "onnxruntime>=1.18,<1.20",
 ]

@@ -15,3 +15,9 @@ wheels/
 
 # claude
 .claude/
+
+# secrets
+.env
+
+# ChromaDB vector store
+chroma_db/
