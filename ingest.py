@@ -1,12 +1,13 @@
-"""One-time Notion → ChromaDB ingestion script.
+"""Notion → ChromaDB ingestion script.
 
 Usage:
     export NOTION_TOKEN=secret_xxx
-    uv run python ingest.py
-
-Re-run any time to refresh the index (upserts are idempotent).
+    uv run python ingest.py              # incremental (skip unchanged, prune deleted)
+    uv run python ingest.py --full       # force full re-index
+    uv run python ingest.py --status     # print collection stats and exit
 """
 
+import argparse
 import asyncio
 import logging
 import os
@@ -44,6 +45,8 @@ RICH_TEXT_BLOCK_TYPES = {
     "callout",
 }
 
+HEADING_BLOCK_TYPES = {"heading_1", "heading_2", "heading_3"}
+
 
 def _extract_plain_text(block: dict[str, Any]) -> str:
     """Return plain text from a block's rich_text array, or empty string."""
@@ -63,16 +66,83 @@ def _get_title(page: dict[str, Any]) -> str:
     return "Untitled"
 
 
-def _chunk_text(text: str, size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> list[str]:
-    """Split text into overlapping chunks."""
-    if not text.strip():
+def _chunk_text(
+    blocks: list[dict[str, str]],
+    size: int = CHUNK_SIZE,
+    overlap: int = CHUNK_OVERLAP,
+) -> list[str]:
+    """Paragraph-aware chunking that prepends the last seen heading to each chunk.
+
+    Splits on paragraph boundaries first. Falls back to word-boundary
+    character-splitting only for paragraphs that exceed ``size`` on their own.
+    The most recent heading is prepended to every chunk so the LLM always has
+    section context.
+    """
+    if not blocks:
         return []
+
+    # Build (heading_context, paragraph_text) pairs
+    tagged: list[tuple[str, str]] = []
+    current_heading = ""
+    for block in blocks:
+        block_type = block["type"]
+        text = block["text"].strip()
+        if not text:
+            continue
+        if block_type in HEADING_BLOCK_TYPES:
+            current_heading = text
+        else:
+            tagged.append((current_heading, text))
+
+    if not tagged:
+        return []
+
     chunks: list[str] = []
-    start = 0
-    while start < len(text):
-        end = start + size
-        chunks.append(text[start:end])
-        start += size - overlap
+    buf_paras: list[str] = []
+    buf_heading = ""
+    buf_len = 0
+
+    def emit_chunk(heading: str, paras: list[str]) -> None:
+        prefix = f"{heading}\n" if heading else ""
+        chunks.append(prefix + "\n".join(paras))
+
+    for heading, para in tagged:
+        if heading:
+            buf_heading = heading
+
+        # Oversized single paragraph: flush buffer then character-split the para
+        if len(para) > size:
+            if buf_paras:
+                emit_chunk(buf_heading, buf_paras)
+                buf_paras = []
+                buf_len = 0
+            start = 0
+            while start < len(para):
+                end = start + size
+                if end < len(para):
+                    space = para.rfind(" ", start, end)
+                    if space > start:
+                        end = space
+                sub = para[start:end].strip()
+                if sub:
+                    emit_chunk(buf_heading, [sub])
+                start = max(start + 1, end - overlap)
+            continue
+
+        # Adding this paragraph would exceed the size limit: flush first
+        if buf_paras and buf_len + len(para) + 1 > size:
+            emit_chunk(buf_heading, buf_paras)
+            # Carry the last paragraph forward as overlap context
+            last = buf_paras[-1]
+            buf_paras = [last] if len(last) + len(para) + 1 <= size else []
+            buf_len = len(buf_paras[0]) if buf_paras else 0
+
+        buf_paras.append(para)
+        buf_len = sum(len(p) for p in buf_paras) + max(0, len(buf_paras) - 1)
+
+    if buf_paras:
+        emit_chunk(buf_heading, buf_paras)
+
     return chunks
 
 
@@ -81,8 +151,12 @@ async def _fetch_text_from_blocks(
     block_id: str,
     depth: int = 0,
     max_depth: int = 10,
-) -> list[str]:
-    """Recursively extract plain text from all blocks, including nested children."""
+) -> list[dict[str, str]]:
+    """Recursively extract typed text blocks from all Notion blocks.
+
+    Returns a list of ``{"type": block_type, "text": plain_text}`` dicts so
+    that callers can distinguish headings from body text when chunking.
+    """
     if depth > max_depth:
         return []
 
@@ -95,20 +169,20 @@ async def _fetch_text_from_blocks(
         logger.warning("Could not fetch blocks for %s: %s", block_id, exc)
         return []
 
-    lines: list[str] = []
+    typed_lines: list[dict[str, str]] = []
     for block in blocks:
         block_type = block.get("type", "")
 
         text = _extract_plain_text(block)
         if text.strip():
-            lines.append(text)
+            typed_lines.append({"type": block_type, "text": text})
 
         # child_page: add title as a reference but skip recursing
         # (child pages are indexed separately via notion.search())
         if block_type == "child_page":
             child_title = block.get("child_page", {}).get("title", "")
             if child_title:
-                lines.append(f"[Sub-page: {child_title}]")
+                typed_lines.append({"type": "paragraph", "text": f"[Sub-page: {child_title}]"})
             continue
 
         # child_database: skip content, just note its existence
@@ -117,27 +191,44 @@ async def _fetch_text_from_blocks(
 
         # Recursively fetch nested children (toggles, callouts, nested lists, etc.)
         if block.get("has_children"):
-            child_lines = await _fetch_text_from_blocks(
+            child_blocks = await _fetch_text_from_blocks(
                 notion, block["id"], depth + 1, max_depth
             )
-            lines.extend(child_lines)
+            typed_lines.extend(child_blocks)
 
-    return lines
+    return typed_lines
 
 
-async def ingest() -> None:
+async def ingest(args: argparse.Namespace) -> None:
     token = os.environ.get("NOTION_TOKEN")
     if not token:
         logger.error("NOTION_TOKEN env var is not set")
         sys.exit(1)
 
-    notion = AsyncClient(auth=token)
-    ollama_client = ollama.AsyncClient()
     chroma = chromadb.PersistentClient(path=CHROMA_PATH)
     collection = chroma.get_or_create_collection(
         name=COLLECTION_NAME,
         metadata={"hnsw:space": "cosine"},
     )
+
+    if args.status:
+        all_chunks = collection.get(include=["metadatas"])
+        metadatas: list[dict[str, Any]] = all_chunks["metadatas"] or []
+        page_ids = {m["page_id"] for m in metadatas if m and "page_id" in m}
+        times = sorted(
+            m["last_edited_time"]
+            for m in metadatas
+            if m and m.get("last_edited_time")
+        )
+        print(f"Total chunks  : {len(metadatas)}")
+        print(f"Distinct pages: {len(page_ids)}")
+        if times:
+            print(f"Oldest edit   : {times[0]}")
+            print(f"Newest edit   : {times[-1]}")
+        return
+
+    notion = AsyncClient(auth=token)
+    ollama_client = ollama.AsyncClient()
 
     logger.info("Fetching all pages from Notion...")
     pages: list[dict[str, Any]] = await async_collect_paginated_api(
@@ -147,25 +238,52 @@ async def ingest() -> None:
     )
     logger.info("Found %d pages", len(pages))
 
+    # Prune chunks for pages that no longer exist in Notion
+    all_chunks = collection.get(include=["metadatas"])
+    indexed_ids = {m["page_id"] for m in all_chunks["metadatas"] if m and "page_id" in m}
+    live_ids = {p["id"] for p in pages}
+    stale_ids = indexed_ids - live_ids
+    if stale_ids:
+        stale_chunks = collection.get(where={"page_id": {"$in": list(stale_ids)}})
+        collection.delete(ids=stale_chunks["ids"])
+        logger.info(
+            "Pruned %d chunks for %d deleted pages",
+            len(stale_chunks["ids"]),
+            len(stale_ids),
+        )
+
     total_chunks = 0
 
     for page in pages:
         page_id: str = page["id"]
         title = _get_title(page)
         page_url: str = page.get("url", f"https://notion.so/{page_id.replace('-', '')}")
+        last_edited_time: str = page.get("last_edited_time", "")
 
-        lines = await _fetch_text_from_blocks(notion, page_id)
-        if not lines:
+        # Skip pages whose content hasn't changed since last index (unless --full)
+        if not args.full:
+            existing = collection.get(
+                where={"page_id": page_id},
+                include=["metadatas"],
+            )
+            if (
+                existing["ids"]
+                and existing["metadatas"][0].get("last_edited_time") == last_edited_time
+            ):
+                logger.debug("Page '%s' unchanged — skipping", title)
+                continue
+
+        blocks = await _fetch_text_from_blocks(notion, page_id)
+        if not blocks:
             logger.debug("Page '%s' produced no indexable text — skipping", title)
             continue
-        full_text = "\n".join(lines)
-        chunks = _chunk_text(full_text)
+        chunks = _chunk_text(blocks)
 
         # Embed and upsert each chunk
         ids: list[str] = []
         embeddings: list[list[float]] = []
         documents: list[str] = []
-        metadatas: list[dict[str, Any]] = []
+        chunk_metadatas: list[dict[str, Any]] = []
 
         for i, chunk in enumerate(chunks):
             try:
@@ -178,8 +296,13 @@ async def ingest() -> None:
             ids.append(f"{page_id}_chunk_{i}")
             embeddings.append(vector)
             documents.append(chunk)
-            metadatas.append(
-                {"title": title, "source": page_url, "page_id": page_id}
+            chunk_metadatas.append(
+                {
+                    "title": title,
+                    "source": page_url,
+                    "page_id": page_id,
+                    "last_edited_time": last_edited_time,
+                }
             )
 
         if ids:
@@ -187,7 +310,7 @@ async def ingest() -> None:
                 ids=ids,
                 embeddings=embeddings,
                 documents=documents,
-                metadatas=metadatas,
+                metadatas=chunk_metadatas,
             )
             total_chunks += len(ids)
             logger.info("Indexed '%s': %d chunk(s)", title, len(ids))
@@ -197,4 +320,8 @@ async def ingest() -> None:
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-    asyncio.run(ingest())
+    parser = argparse.ArgumentParser(description="Notion → ChromaDB ingestion")
+    parser.add_argument("--full", action="store_true", help="Force full re-index")
+    parser.add_argument("--status", action="store_true", help="Print collection stats and exit")
+    args = parser.parse_args()
+    asyncio.run(ingest(args))

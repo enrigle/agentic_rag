@@ -31,6 +31,8 @@ class AgentState(TypedDict):
 class AgenticRAGSystem:
     """Production agentic RAG with LangGraph orchestration and Ollama."""
 
+    MIN_SIMILARITY = 0.35  # cosine similarity threshold; results below this are dropped
+
     def __init__(
         self,
         model: str = "llama3.2",
@@ -160,7 +162,7 @@ class AgenticRAGSystem:
                 ),
             )
 
-            rag_results: list[dict[str, Any]] = [
+            all_results: list[dict[str, Any]] = [
                 {
                     "source": meta.get("source", ""),
                     "title": meta.get("title", ""),
@@ -173,6 +175,20 @@ class AgenticRAGSystem:
                     results["metadatas"][0],
                 )
             ]
+            rag_results = [r for r in all_results if r["score"] >= self.MIN_SIMILARITY]
+            dropped = len(all_results) - len(rag_results)
+            if dropped:
+                logger.info("rag_search: dropped %d results below threshold %.2f", dropped, self.MIN_SIMILARITY)
+
+            if not rag_results:
+                logger.info("rag_search: no results above threshold — routing to web search")
+                return {
+                    **state,
+                    "rag_results": [],
+                    "needs_web_search": True,
+                    "tool_calls": state["tool_calls"] + 1,
+                }
+
             logger.info("rag_search: returned %d results", len(rag_results))
             return {
                 **state,
@@ -343,5 +359,5 @@ class AgenticRAGSystem:
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     system = AgenticRAGSystem()
-    result = asyncio.run(system.query("How to deploy ML models in web apps?"))
+    result = asyncio.run(system.query("what is Agent AI?"))
     print(json.dumps(result, indent=2))
