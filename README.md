@@ -46,6 +46,8 @@ uv run python ingest.py --status  # print chunk/page counts and exit
 
 Incremental mode (default) uses `last_edited_time` to skip unchanged pages and removes chunks for pages deleted from Notion. Use `--full` after changing chunking settings.
 
+Ingestion builds both the ChromaDB vector index and a BM25 index (`./bm25_index/`). Queries use both via Reciprocal Rank Fusion — BM25 catches exact keyword matches that vector search can miss, and vector search handles semantic similarity.
+
 ## Eval
 
 ```bash

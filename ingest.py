@@ -9,15 +9,18 @@ Usage:
 
 import argparse
 import asyncio
+import json
 import logging
 import os
 import sys
+from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
 
 load_dotenv()  # loads .env from cwd (or any parent dir)
 
+import bm25s
 import chromadb
 import ollama
 from notion_client import AsyncClient
@@ -26,6 +29,7 @@ from notion_client.helpers import async_collect_paginated_api
 logger = logging.getLogger(__name__)
 
 CHROMA_PATH = "./chroma_db"
+BM25_PATH = "./bm25_index"
 COLLECTION_NAME = "notion_kb"
 EMBED_MODEL = "nomic-embed-text"
 CHUNK_SIZE = 800
@@ -66,6 +70,11 @@ def _get_title(page: dict[str, Any]) -> str:
     return "Untitled"
 
 
+def _emit_chunk(chunks: list[str], heading: str, paras: list[str]) -> None:
+    prefix = f"{heading}\n" if heading else ""
+    chunks.append(prefix + "\n".join(paras))
+
+
 def _chunk_text(
     blocks: list[dict[str, str]],
     size: int = CHUNK_SIZE,
@@ -102,10 +111,6 @@ def _chunk_text(
     buf_heading = ""
     buf_len = 0
 
-    def emit_chunk(heading: str, paras: list[str]) -> None:
-        prefix = f"{heading}\n" if heading else ""
-        chunks.append(prefix + "\n".join(paras))
-
     for heading, para in tagged:
         if heading:
             buf_heading = heading
@@ -113,7 +118,7 @@ def _chunk_text(
         # Oversized single paragraph: flush buffer then character-split the para
         if len(para) > size:
             if buf_paras:
-                emit_chunk(buf_heading, buf_paras)
+                _emit_chunk(chunks,buf_heading, buf_paras)
                 buf_paras = []
                 buf_len = 0
             start = 0
@@ -125,13 +130,13 @@ def _chunk_text(
                         end = space
                 sub = para[start:end].strip()
                 if sub:
-                    emit_chunk(buf_heading, [sub])
+                    _emit_chunk(chunks,buf_heading, [sub])
                 start = max(start + 1, end - overlap)
             continue
 
         # Adding this paragraph would exceed the size limit: flush first
         if buf_paras and buf_len + len(para) + 1 > size:
-            emit_chunk(buf_heading, buf_paras)
+            _emit_chunk(chunks,buf_heading, buf_paras)
             # Carry the last paragraph forward as overlap context
             last = buf_paras[-1]
             buf_paras = [last] if len(last) + len(para) + 1 <= size else []
@@ -141,7 +146,7 @@ def _chunk_text(
         buf_len = sum(len(p) for p in buf_paras) + max(0, len(buf_paras) - 1)
 
     if buf_paras:
-        emit_chunk(buf_heading, buf_paras)
+        _emit_chunk(chunks,buf_heading, buf_paras)
 
     return chunks
 
@@ -197,6 +202,23 @@ async def _fetch_text_from_blocks(
             typed_lines.extend(child_blocks)
 
     return typed_lines
+
+
+def _rebuild_bm25(collection: chromadb.Collection) -> None:
+    """Rebuild BM25 index from all documents in the collection."""
+    all_docs = collection.get(include=["documents"])
+    ids: list[str] = all_docs["ids"] or []
+    documents: list[str] = all_docs["documents"] or []
+    if not documents:
+        logger.warning("BM25: collection is empty — skipping index build")
+        return
+    tokenized = bm25s.tokenize(documents, show_progress=False)
+    retriever = bm25s.BM25()
+    retriever.index(tokenized, show_progress=False)
+    Path(BM25_PATH).mkdir(exist_ok=True)
+    retriever.save(BM25_PATH)
+    (Path(BM25_PATH) / "id_map.json").write_text(json.dumps(ids))
+    logger.info("BM25 index saved: %d documents", len(documents))
 
 
 async def ingest(args: argparse.Namespace) -> None:
@@ -315,6 +337,7 @@ async def ingest(args: argparse.Namespace) -> None:
             total_chunks += len(ids)
             logger.info("Indexed '%s': %d chunk(s)", title, len(ids))
 
+    _rebuild_bm25(collection)
     print(f"Done. Indexed {len(pages)} pages, {total_chunks} chunks into ChromaDB at {CHROMA_PATH!r}.")
 
 

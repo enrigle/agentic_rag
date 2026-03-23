@@ -2,8 +2,10 @@ import json
 import logging
 import asyncio
 import time
+from pathlib import Path
 from typing import Any, Literal, TypedDict
 
+import bm25s
 import chromadb
 import ollama
 from duckduckgo_search import DDGS
@@ -12,6 +14,8 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.checkpoint.memory import MemorySaver
 
 logger = logging.getLogger(__name__)
+
+BM25_PATH = "./bm25_index"
 
 
 class AgentState(TypedDict):
@@ -28,10 +32,26 @@ class AgentState(TypedDict):
     error: str | None
 
 
+def _rrf_merge(
+    vector_ids: list[str],
+    bm25_ids: list[str],
+    k: int = 60,
+    top_n: int = 5,
+) -> tuple[list[str], dict[str, float]]:
+    """Reciprocal Rank Fusion. Returns (sorted_ids, rrf_scores)."""
+    scores: dict[str, float] = {}
+    for rank, doc_id in enumerate(vector_ids):
+        scores[doc_id] = scores.get(doc_id, 0.0) + 1.0 / (k + rank + 1)
+    for rank, doc_id in enumerate(bm25_ids):
+        scores[doc_id] = scores.get(doc_id, 0.0) + 1.0 / (k + rank + 1)
+    merged = sorted(scores, key=lambda x: scores[x], reverse=True)[:top_n]
+    return merged, scores
+
+
 class AgenticRAGSystem:
     """Production agentic RAG with LangGraph orchestration and Ollama."""
 
-    MIN_SIMILARITY = 0.35  # cosine similarity threshold; results below this are dropped
+    MIN_SIMILARITY = 0.35  # cosine similarity threshold for vector candidates
 
     def __init__(
         self,
@@ -45,7 +65,25 @@ class AgenticRAGSystem:
         self.embed_model = "nomic-embed-text"
         self.chroma = chromadb.PersistentClient(path=chroma_path)
         self.collection = self.chroma.get_or_create_collection("notion_kb")
+        self.bm25_retriever: bm25s.BM25 | None = None
+        self.bm25_ids: list[str] = []
+        self._load_bm25()
         self.graph = self._build_graph()
+
+    def _load_bm25(self) -> None:
+        bm25_path = Path(BM25_PATH)
+        id_map_path = bm25_path / "id_map.json"
+        if not bm25_path.exists() or not id_map_path.exists():
+            logger.warning(
+                "BM25 index not found — falling back to vector-only search. Run ingest.py to build it."
+            )
+            return
+        try:
+            self.bm25_retriever = bm25s.BM25.load(str(bm25_path), load_corpus=False)
+            self.bm25_ids = json.loads(id_map_path.read_text())
+            logger.info("BM25 index loaded: %d documents", len(self.bm25_ids))
+        except Exception as exc:
+            logger.warning("Failed to load BM25 index: %s — vector-only search active", exc)
 
     async def _invoke_ollama(self, prompt: str) -> str:
         """Call local Ollama daemon asynchronously."""
@@ -97,7 +135,6 @@ class AgenticRAGSystem:
 
         try:
             text = await self._invoke_ollama(prompt)
-            # Extract JSON from response (model may wrap it in markdown fences)
             start = text.find("{")
             end = text.rfind("}") + 1
             parsed = json.loads(text[start:end])
@@ -130,11 +167,9 @@ class AgenticRAGSystem:
             }
 
     async def rag_search(self, state: AgentState) -> AgentState:
-        """Search internal knowledge base via ChromaDB + Ollama embeddings."""
+        """Hybrid search: vector (ChromaDB) + BM25, merged via RRF."""
         if state.get("error"):
-            logger.warning(
-                "rag_search: skipping due to prior error: %s", state["error"]
-            )
+            logger.warning("rag_search: skipping due to prior error: %s", state["error"])
             return {**state, "rag_results": [], "tool_calls": state["tool_calls"] + 1}
 
         if state["tool_calls"] >= state["max_tool_calls"]:
@@ -147,41 +182,65 @@ class AgenticRAGSystem:
             }
 
         try:
+            # --- Vector search ---
             embed_resp = await self.client.embed(
                 model=self.embed_model, input=state["query"]
             )
             query_vec: list[float] = embed_resp["embeddings"][0]
 
             loop = asyncio.get_running_loop()
-            results: dict[str, Any] = await loop.run_in_executor(
+            vector_raw: dict[str, Any] = await loop.run_in_executor(
                 None,
                 lambda: self.collection.query(
                     query_embeddings=[query_vec],
-                    n_results=5,
+                    n_results=10,
                     include=["documents", "distances", "metadatas"],
                 ),
             )
 
-            all_results: list[dict[str, Any]] = [
-                {
-                    "source": meta.get("source", ""),
-                    "title": meta.get("title", ""),
-                    "content": doc,
-                    "score": round(1 - dist, 4),
-                }
-                for doc, dist, meta in zip(
-                    results["documents"][0],
-                    results["distances"][0],
-                    results["metadatas"][0],
-                )
-            ]
-            rag_results = [r for r in all_results if r["score"] >= self.MIN_SIMILARITY]
-            dropped = len(all_results) - len(rag_results)
-            if dropped:
-                logger.info("rag_search: dropped %d results below threshold %.2f", dropped, self.MIN_SIMILARITY)
+            # Filter by similarity threshold; keep ordered list of IDs
+            vector_ids: list[str] = []
+            vector_data: dict[str, dict[str, Any]] = {}
+            for doc_id, doc, dist, meta in zip(
+                vector_raw["ids"][0],
+                vector_raw["documents"][0],
+                vector_raw["distances"][0],
+                vector_raw["metadatas"][0],
+            ):
+                score = round(1 - dist, 4)
+                if score >= self.MIN_SIMILARITY:
+                    vector_ids.append(doc_id)
+                    vector_data[doc_id] = {"document": doc, "metadata": meta, "score": score}
 
-            if not rag_results:
-                logger.info("rag_search: no results above threshold — routing to web search")
+            dropped = len(vector_raw["ids"][0]) - len(vector_ids)
+            if dropped:
+                logger.info(
+                    "rag_search: dropped %d vector results below threshold %.2f",
+                    dropped,
+                    self.MIN_SIMILARITY,
+                )
+
+            # --- BM25 search ---
+            bm25_ids: list[str] = []
+            if self.bm25_retriever and self.bm25_ids:
+                try:
+                    k = min(10, len(self.bm25_ids))
+                    results, _ = self.bm25_retriever.retrieve(
+                        bm25s.tokenize([state["query"]], show_progress=False),
+                        corpus=self.bm25_ids,
+                        k=k,
+                        show_progress=False,
+                    )
+                    bm25_ids = list(results[0])
+                    logger.info("rag_search: BM25 returned %d candidates", len(bm25_ids))
+                except Exception as exc:
+                    logger.warning("rag_search: BM25 failed: %s — using vector only", exc)
+
+            # --- RRF merge ---
+            merged_ids, rrf_scores = _rrf_merge(vector_ids, bm25_ids, top_n=5)
+
+            if not merged_ids:
+                logger.info("rag_search: no results after RRF — routing to web search")
                 return {
                     **state,
                     "rag_results": [],
@@ -189,12 +248,43 @@ class AgenticRAGSystem:
                     "tool_calls": state["tool_calls"] + 1,
                 }
 
-            logger.info("rag_search: returned %d results", len(rag_results))
+            # Fetch data for IDs that came from BM25 only (not already in vector_data)
+            missing_ids = [fid for fid in merged_ids if fid not in vector_data]
+            if missing_ids:
+                fetched = await loop.run_in_executor(
+                    None,
+                    lambda: self.collection.get(
+                        ids=missing_ids, include=["documents", "metadatas"]
+                    ),
+                )
+                for fid, doc, meta in zip(
+                    fetched["ids"], fetched["documents"], fetched["metadatas"]
+                ):
+                    vector_data[fid] = {"document": doc, "metadata": meta, "score": 0.0}
+
+            rag_results: list[dict[str, Any]] = [
+                {
+                    "source": vector_data[fid]["metadata"].get("source", ""),
+                    "title": vector_data[fid]["metadata"].get("title", ""),
+                    "content": vector_data[fid]["document"],
+                    "score": round(rrf_scores[fid], 6),
+                }
+                for fid in merged_ids
+                if fid in vector_data
+            ]
+
+            logger.info(
+                "rag_search: hybrid returned %d results (vector=%d, bm25=%d)",
+                len(rag_results),
+                len(vector_ids),
+                len(bm25_ids),
+            )
             return {
                 **state,
                 "rag_results": rag_results,
                 "tool_calls": state["tool_calls"] + 1,
             }
+
         except Exception as exc:
             logger.exception("rag_search: error: %s", exc)
             return {
@@ -207,9 +297,7 @@ class AgenticRAGSystem:
     async def web_search(self, state: AgentState) -> AgentState:
         """Search the web via DuckDuckGo."""
         if state.get("error"):
-            logger.warning(
-                "web_search: skipping due to prior error: %s", state["error"]
-            )
+            logger.warning("web_search: skipping due to prior error: %s", state["error"])
             return {**state, "web_results": [], "tool_calls": state["tool_calls"] + 1}
 
         if state["tool_calls"] >= state["max_tool_calls"]:
@@ -359,5 +447,5 @@ class AgenticRAGSystem:
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     system = AgenticRAGSystem()
-    result = asyncio.run(system.query("what is Agent AI?"))
+    result = asyncio.run(system.query("How to deploy ML models in web apps?"))
     print(json.dumps(result, indent=2))
