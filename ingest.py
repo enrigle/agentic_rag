@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import sys
+import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +33,7 @@ CHROMA_PATH = "./chroma_db"
 BM25_PATH = "./bm25_index"
 COLLECTION_NAME = "notion_kb"
 EMBED_MODEL = "nomic-embed-text"
+VISION_MODEL = "llava"
 CHUNK_SIZE = 800
 CHUNK_OVERLAP = 100
 
@@ -151,8 +153,28 @@ def _chunk_text(
     return chunks
 
 
+async def _caption_image(ollama_client: ollama.AsyncClient, url: str) -> str:
+    """Download image and return a text caption via vision model."""
+    try:
+        with urllib.request.urlopen(url, timeout=10) as resp:
+            image_bytes = resp.read()
+        response = await ollama_client.chat(
+            model=VISION_MODEL,
+            messages=[{
+                "role": "user",
+                "content": "Extract any text visible in this image. If it's a diagram or chart, describe what it shows. Be concise.",
+                "images": [image_bytes],
+            }],
+        )
+        return response["message"]["content"].strip()
+    except Exception as exc:
+        logger.warning("Image captioning failed (%s): %s", url, exc)
+        return ""
+
+
 async def _fetch_text_from_blocks(
     notion: AsyncClient,
+    ollama_client: ollama.AsyncClient,
     block_id: str,
     depth: int = 0,
     max_depth: int = 10,
@@ -182,6 +204,15 @@ async def _fetch_text_from_blocks(
         if text.strip():
             typed_lines.append({"type": block_type, "text": text})
 
+        if block_type == "image":
+            img = block.get("image", {})
+            url = img.get("file", {}).get("url") or img.get("external", {}).get("url", "")
+            if url:
+                caption = await _caption_image(ollama_client, url)
+                if caption:
+                    typed_lines.append({"type": "paragraph", "text": f"[Image: {caption}]"})
+            continue
+
         # child_page: add title as a reference but skip recursing
         # (child pages are indexed separately via notion.search())
         if block_type == "child_page":
@@ -197,7 +228,7 @@ async def _fetch_text_from_blocks(
         # Recursively fetch nested children (toggles, callouts, nested lists, etc.)
         if block.get("has_children"):
             child_blocks = await _fetch_text_from_blocks(
-                notion, block["id"], depth + 1, max_depth
+                notion, ollama_client, block["id"], depth + 1, max_depth
             )
             typed_lines.extend(child_blocks)
 
@@ -295,7 +326,7 @@ async def ingest(args: argparse.Namespace) -> None:
                 logger.debug("Page '%s' unchanged — skipping", title)
                 continue
 
-        blocks = await _fetch_text_from_blocks(notion, page_id)
+        blocks = await _fetch_text_from_blocks(notion, ollama_client, page_id)
         if not blocks:
             logger.debug("Page '%s' produced no indexable text — skipping", title)
             continue
