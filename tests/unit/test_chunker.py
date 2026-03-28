@@ -104,16 +104,18 @@ def test_chunk_text_oversized_paragraph_is_split() -> None:
 
 
 def test_chunk_text_oversized_paragraph_overlap() -> None:
-    """Verify that consecutive oversized chunks share overlapping content."""
-    # Create a paragraph large enough to produce at least 2 chunks
-    long_text = " ".join(f"word{i}" for i in range(200))  # plenty of text
-    blocks = [{"type": "paragraph", "text": long_text}]
-    chunks = _chunk_text(blocks, size=50, overlap=20)
+    """Chunks from an oversized paragraph should overlap."""
+    long_para = "word" * 50  # creates "wordword..." — long enough for multiple chunks
+    blocks = [{"type": "paragraph", "text": long_para}]
+    chunks = _chunk_text(blocks, size=20, overlap=10)
     assert len(chunks) >= 2
-    # With overlap, ending of chunk N-1 should appear at start of chunk N
-    # (at least some word from end of prev chunk appears in next chunk)
-    # This is a structural check — just verify we get multiple chunks
-    assert all(len(c) > 0 for c in chunks)
+    # The end of chunk 0 and the start of chunk 1 should share content
+    # due to the overlap
+    chunk0_end = chunks[0][-10:]  # last 10 chars of first chunk
+    chunk1_start = chunks[1][:10]  # first 10 chars of second chunk
+    assert chunk0_end in chunks[1] or chunk1_start in chunks[0], (
+        f"Expected overlap between chunks, got:\n  chunk0 end: {chunk0_end!r}\n  chunk1 start: {chunk1_start!r}"
+    )
 
 
 def test_chunk_text_multiple_paragraphs_batched() -> None:
