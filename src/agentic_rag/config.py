@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 import yaml
 
@@ -49,12 +50,13 @@ class RAGConfig:
     ingestion: IngestionConfig = field(default_factory=IngestionConfig)
 
 
-def _parse_sub(cls: type, data: dict[str, Any]) -> Any:
-    """Construct a dataclass from a dict, ignoring unknown keys."""
-    import dataclasses
+_DC = TypeVar("_DC")
 
-    known = {f.name for f in dataclasses.fields(cls)}
-    return cls(**{k: v for k, v in data.items() if k in known})
+
+def _parse_sub(cls: type[_DC], data: dict[str, Any]) -> _DC:
+    """Construct a dataclass from a dict, ignoring unknown keys."""
+    known = {f.name for f in dataclasses.fields(cls)}  # type: ignore[arg-type]
+    return cls(**{k: v for k, v in data.items() if k in known})  # type: ignore[return-value]
 
 
 def load_config(path: Path | None = None) -> RAGConfig:
@@ -88,9 +90,19 @@ def load_config(path: Path | None = None) -> RAGConfig:
     top_level_keys = {"chroma_path", "bm25_path", "collection_name", "max_tool_calls"}
     top_level = {k: v for k, v in raw.items() if k in top_level_keys}
 
-    return RAGConfig(
-        **top_level,
-        llm=llm_cfg,
-        retriever=retriever_cfg,
-        ingestion=ingestion_cfg,
-    )
+    try:
+        return RAGConfig(
+            **top_level,
+            llm=llm_cfg,
+            retriever=retriever_cfg,
+            ingestion=ingestion_cfg,
+        )
+    except TypeError as exc:
+        logger.warning(
+            "Invalid top-level config values in %s: %s; using defaults.", resolved, exc
+        )
+        return RAGConfig(
+            llm=llm_cfg,
+            retriever=retriever_cfg,
+            ingestion=ingestion_cfg,
+        )
