@@ -14,6 +14,8 @@ class OllamaLLM(BaseLLM):
     """Concrete LLM backend using the Ollama async client."""
 
     def __init__(self, config: LLMConfig) -> None:
+        if not config.base_url:
+            raise ValueError("LLMConfig.base_url must not be empty")
         self._config = config
         self._client = ollama.AsyncClient(host=config.base_url)
         logger.debug(
@@ -25,24 +27,42 @@ class OllamaLLM(BaseLLM):
 
     async def chat(self, prompt: str) -> str:
         """Send a user prompt to the chat model and return the reply text."""
+        if not prompt:
+            raise ValueError("prompt must be a non-empty string")
         logger.debug("chat() → model=%s prompt_len=%d", self._config.model, len(prompt))
-        response = await self._client.chat(
-            model=self._config.model,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        content: str = response.message.content  # type: ignore[assignment]
+        try:
+            response = await self._client.chat(
+                model=self._config.model,
+                messages=[{"role": "user", "content": prompt}],
+            )
+        except ollama.ResponseError as exc:
+            raise RuntimeError(
+                f"Ollama chat failed (model={self._config.model!r}): {exc}"
+            ) from exc
+        content = response.message.content
+        if not content:
+            raise ValueError(f"Ollama returned empty content for model={self._config.model!r}")
         logger.debug("chat() ← content_len=%d", len(content))
         return content
 
     async def embed(self, text: str) -> list[float]:
         """Return the embedding vector for *text* using the embed model."""
+        if not text:
+            raise ValueError("text must be a non-empty string")
         logger.debug(
             "embed() → model=%s text_len=%d", self._config.embed_model, len(text)
         )
-        response = await self._client.embed(
-            model=self._config.embed_model,
-            input=text,
-        )
-        vector: list[float] = response["embeddings"][0]
+        try:
+            response = await self._client.embed(
+                model=self._config.embed_model, input=text
+            )
+        except ollama.ResponseError as exc:
+            raise RuntimeError(
+                f"Ollama embed failed (model={self._config.embed_model!r}): {exc}"
+            ) from exc
+        embeddings: list[list[float]] = response.get("embeddings") or []  # type: ignore[assignment]
+        if not embeddings or not embeddings[0]:
+            raise ValueError(f"Ollama returned no embeddings for model={self._config.embed_model!r}")
+        vector: list[float] = embeddings[0]
         logger.debug("embed() ← dim=%d", len(vector))
         return vector
