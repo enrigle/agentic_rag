@@ -56,7 +56,13 @@ class Evaluator:
     """Interactive evaluator for the agentic RAG pipeline."""
 
     def __init__(self, config: RAGConfig | None = None) -> None:
-        self._pipeline: RAGPipeline = create_pipeline(config)
+        self._config = config
+        self._pipeline: RAGPipeline | None = None
+
+    def _get_pipeline(self) -> RAGPipeline:
+        if self._pipeline is None:
+            self._pipeline = create_pipeline(self._config)
+        return self._pipeline
 
     async def run(self) -> None:
         """Run interactive evaluation over queries.json, appending rated results."""
@@ -79,7 +85,7 @@ class Evaluator:
                 print(f"Expected keywords: {', '.join(expected)}")
             print("Running query...")
 
-            result = await self._pipeline.query(query)
+            result = await self._get_pipeline().query(query)
             answer: str = result.answer
             sources = result.sources
 

@@ -71,7 +71,6 @@ class RAGPipeline:
                 **state,
                 "error": "Circuit breaker: max tool calls reached",
                 "needs_web_search": False,
-                "tool_calls": state["tool_calls"] + 1,
             }
 
         prompt = (
@@ -129,7 +128,6 @@ class RAGPipeline:
                 **state,
                 "error": "Circuit breaker: max tool calls reached",
                 "rag_results": [],
-                "tool_calls": state["tool_calls"] + 1,
             }
 
         try:
@@ -188,7 +186,6 @@ class RAGPipeline:
                 **state,
                 "error": "Circuit breaker: max tool calls reached",
                 "web_results": [],
-                "tool_calls": state["tool_calls"] + 1,
             }
 
         try:
@@ -200,12 +197,13 @@ class RAGPipeline:
             web_results: list[dict[str, Any]] = [
                 {
                     "id": r.get("href", ""),
-                    "source": r["href"],
-                    "title": r["title"],
-                    "content": r["body"],
+                    "source": r.get("href", ""),
+                    "title": r.get("title", ""),
+                    "content": r.get("body", ""),
                     "score": 1.0,
                 }
                 for r in (raw or [])
+                if r.get("href") and r.get("body")
             ]
             logger.info("web_search: returned %d results", len(web_results))
             return {
@@ -239,7 +237,12 @@ class RAGPipeline:
         all_results = rag_results + web_results
 
         if state["tool_calls"] >= state["max_tool_calls"]:
-            logger.warning("Circuit breaker triggered in synthesize")
+            logger.warning("Circuit breaker triggered in synthesize; returning best-effort")
+            if all_results:
+                answer = f"Based on {len(all_results)} retrieved sources (circuit breaker reached)."
+            else:
+                answer = "Unable to answer: circuit breaker reached with no results."
+            return {**state, "final_answer": answer}
 
         if state.get("error") and not all_results:
             return {
