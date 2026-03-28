@@ -5,10 +5,12 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any
 
+from agentic_rag.models import SearchResult
+
 
 class BaseVectorStore(ABC):
     @abstractmethod
-    async def search(self, query_vec: list[float], top_k: int) -> list[Any]:
+    async def search(self, query_vec: list[float], top_k: int) -> list[SearchResult]:
         """Search vector store and return list[SearchResult]."""
         ...
 
