@@ -1,0 +1,20 @@
+chroma_path: ./chroma_db
+bm25_path: ./bm25_index
+collection_name: notion_kb
+max_tool_calls: 5
+
+llm:
+  model: llama3.2
+  embed_model: nomic-embed-text
+  base_url: http://localhost:11434
+
+retriever:
+  min_similarity: 0.35
+  top_n: 5
+  rrf_k: 60
+  bm25_top_k: 10
+
+ingestion:
+  chunk_size: 800
+  chunk_overlap: 100
+  vision_model: llava

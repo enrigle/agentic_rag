@@ -12,4 +12,20 @@ dependencies = [
     "notion-client>=3.0.0",
     "ollama>=0.6.1",
     "onnxruntime>=1.18,<1.20",
+    "python-dotenv>=1.0.0",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.15.8",
 ]
