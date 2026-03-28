@@ -41,7 +41,9 @@ class OllamaLLM(BaseLLM):
             ) from exc
         content = response.message.content
         if not content:
-            raise ValueError(f"Ollama returned empty content for model={self._config.model!r}")
+            raise ValueError(
+                f"Ollama returned empty content for model={self._config.model!r}"
+            )
         logger.debug("chat() ← content_len=%d", len(content))
         return content
 
@@ -60,9 +62,11 @@ class OllamaLLM(BaseLLM):
             raise RuntimeError(
                 f"Ollama embed failed (model={self._config.embed_model!r}): {exc}"
             ) from exc
-        embeddings: list[list[float]] = response.get("embeddings") or []  # type: ignore[assignment]
+        embeddings: list[list[float]] = response.embeddings or []  # type: ignore[assignment]
         if not embeddings or not embeddings[0]:
-            raise ValueError(f"Ollama returned no embeddings for model={self._config.embed_model!r}")
+            raise ValueError(
+                f"Ollama returned no embeddings for model={self._config.embed_model!r}"
+            )
         vector: list[float] = embeddings[0]
         logger.debug("embed() ← dim=%d", len(vector))
         return vector

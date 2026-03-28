@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 
 from agentic_rag.config import RAGConfig, load_config
 
@@ -96,6 +95,7 @@ retriever:
     assert cfg.retriever.top_n == 7
     # Other retriever fields should keep defaults
     from agentic_rag.config import RetrieverConfig
+
     defaults = RetrieverConfig()
     assert cfg.retriever.min_similarity == defaults.min_similarity
 

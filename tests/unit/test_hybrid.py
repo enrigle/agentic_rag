@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
 
 from agentic_rag.retrieval.hybrid import _rrf_merge
 

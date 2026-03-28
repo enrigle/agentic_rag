@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
 
 from agentic_rag.ingestion.chunker import _chunk_text, _extract_plain_text
 
@@ -13,7 +12,10 @@ from agentic_rag.ingestion.chunker import _chunk_text, _extract_plain_text
 
 
 def test_extract_plain_text_unknown_type_returns_empty() -> None:
-    block = {"type": "unsupported_type", "unsupported_type": {"rich_text": [{"plain_text": "hi"}]}}
+    block = {
+        "type": "unsupported_type",
+        "unsupported_type": {"rich_text": [{"plain_text": "hi"}]},
+    }
     assert _extract_plain_text(block) == ""
 
 

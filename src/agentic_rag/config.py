@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, TypeVar
 
-import yaml
+import yaml  # type: ignore[import-untyped]
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +56,7 @@ _DC = TypeVar("_DC")
 def _parse_sub(cls: type[_DC], data: dict[str, Any]) -> _DC:
     """Construct a dataclass from a dict, ignoring unknown keys."""
     known = {f.name for f in dataclasses.fields(cls)}  # type: ignore[arg-type]
-    return cls(**{k: v for k, v in data.items() if k in known})  # type: ignore[return-value]
+    return cls(**{k: v for k, v in data.items() if k in known})
 
 
 def load_config(path: Path | None = None) -> RAGConfig:

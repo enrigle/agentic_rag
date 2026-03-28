@@ -9,6 +9,7 @@ import time
 from typing import Any, Literal
 
 from duckduckgo_search import DDGS
+from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
@@ -40,11 +41,11 @@ class RAGPipeline:
         self._keyword_retriever = keyword_retriever
         self._config = config
         self._hybrid = HybridRetriever(vector_store, keyword_retriever, config)
-        self._graph: CompiledStateGraph = self._build_graph()
+        self._graph: CompiledStateGraph[Any, Any, Any] = self._build_graph()
 
-    def _build_graph(self) -> CompiledStateGraph:
+    def _build_graph(self) -> CompiledStateGraph[Any, Any, Any]:
         """Build the LangGraph agent graph."""
-        graph: StateGraph = StateGraph(AgentState)
+        graph: StateGraph[AgentState, AgentState, Any] = StateGraph(AgentState)
 
         graph.add_node("analyze", self.analyze_query)
         graph.add_node("rag_search", self.rag_search)
@@ -237,7 +238,9 @@ class RAGPipeline:
         all_results = rag_results + web_results
 
         if state["tool_calls"] >= state["max_tool_calls"]:
-            logger.warning("Circuit breaker triggered in synthesize; returning best-effort")
+            logger.warning(
+                "Circuit breaker triggered in synthesize; returning best-effort"
+            )
             if all_results:
                 answer = f"Based on {len(all_results)} retrieved sources (circuit breaker reached)."
             else:
@@ -294,11 +297,11 @@ class RAGPipeline:
             "error": None,
         }
 
-        graph_config = {"configurable": {"thread_id": thread_id}}
+        graph_config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
         t0 = time.monotonic()
 
         try:
-            final_state: AgentState = await self._graph.ainvoke(
+            final_state: AgentState = await self._graph.ainvoke(  # type: ignore[assignment]
                 initial_state, config=graph_config
             )
         except Exception as exc:

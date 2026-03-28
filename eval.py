@@ -61,7 +61,9 @@ def _load_results() -> list[dict[str, Any]]:
 async def run_eval() -> None:
     queries = _load_queries()
     system = AgenticRAGSystem()
-    print(f"Evaluating {len(queries)} queries. Rate each answer: [y]es / [n]o / [s]kip\n")
+    print(
+        f"Evaluating {len(queries)} queries. Rate each answer: [y]es / [n]o / [s]kip\n"
+    )
 
     for q in queries:
         qid: str = q.get("id", "")
@@ -148,7 +150,9 @@ def run_report() -> None:
 if __name__ == "__main__":
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(message)s")
     parser = argparse.ArgumentParser(description="Eval the agentic RAG system")
-    parser.add_argument("--report", action="store_true", help="Print summary from saved results")
+    parser.add_argument(
+        "--report", action="store_true", help="Print summary from saved results"
+    )
     args = parser.parse_args()
 
     if args.report:

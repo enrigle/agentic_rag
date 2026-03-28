@@ -31,5 +31,9 @@ dev = [
     "ruff>=0.15.8",
 ]
 
+[tool.ruff]
+exclude = ["eval.py", "ingest.py", "main.py"]
+
 [tool.pytest.ini_options]
+testpaths = ["tests"]
 asyncio_mode = "auto"

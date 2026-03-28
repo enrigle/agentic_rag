@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
-from agentic_rag.config import RAGConfig, LLMConfig, RetrieverConfig
+from agentic_rag.config import RAGConfig
 from agentic_rag.models import QueryResult, SearchResult
 from agentic_rag.llm.base import BaseLLM
 from agentic_rag.retrieval.base import BaseVectorStore, BaseKeywordRetriever

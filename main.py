@@ -83,7 +83,9 @@ class AgenticRAGSystem:
             self.bm25_ids = json.loads(id_map_path.read_text())
             logger.info("BM25 index loaded: %d documents", len(self.bm25_ids))
         except Exception as exc:
-            logger.warning("Failed to load BM25 index: %s — vector-only search active", exc)
+            logger.warning(
+                "Failed to load BM25 index: %s — vector-only search active", exc
+            )
 
     async def _invoke_ollama(self, prompt: str) -> str:
         """Call local Ollama daemon asynchronously."""
@@ -169,7 +171,9 @@ class AgenticRAGSystem:
     async def rag_search(self, state: AgentState) -> AgentState:
         """Hybrid search: vector (ChromaDB) + BM25, merged via RRF."""
         if state.get("error"):
-            logger.warning("rag_search: skipping due to prior error: %s", state["error"])
+            logger.warning(
+                "rag_search: skipping due to prior error: %s", state["error"]
+            )
             return {**state, "rag_results": [], "tool_calls": state["tool_calls"] + 1}
 
         if state["tool_calls"] >= state["max_tool_calls"]:
@@ -210,7 +214,11 @@ class AgenticRAGSystem:
                 score = round(1 - dist, 4)
                 if score >= self.MIN_SIMILARITY:
                     vector_ids.append(doc_id)
-                    vector_data[doc_id] = {"document": doc, "metadata": meta, "score": score}
+                    vector_data[doc_id] = {
+                        "document": doc,
+                        "metadata": meta,
+                        "score": score,
+                    }
 
             dropped = len(vector_raw["ids"][0]) - len(vector_ids)
             if dropped:
@@ -232,9 +240,13 @@ class AgenticRAGSystem:
                         show_progress=False,
                     )
                     bm25_ids = list(results[0])
-                    logger.info("rag_search: BM25 returned %d candidates", len(bm25_ids))
+                    logger.info(
+                        "rag_search: BM25 returned %d candidates", len(bm25_ids)
+                    )
                 except Exception as exc:
-                    logger.warning("rag_search: BM25 failed: %s — using vector only", exc)
+                    logger.warning(
+                        "rag_search: BM25 failed: %s — using vector only", exc
+                    )
 
             # --- RRF merge ---
             merged_ids, rrf_scores = _rrf_merge(vector_ids, bm25_ids, top_n=5)
@@ -297,7 +309,9 @@ class AgenticRAGSystem:
     async def web_search(self, state: AgentState) -> AgentState:
         """Search the web via DuckDuckGo."""
         if state.get("error"):
-            logger.warning("web_search: skipping due to prior error: %s", state["error"])
+            logger.warning(
+                "web_search: skipping due to prior error: %s", state["error"]
+            )
             return {**state, "web_results": [], "tool_calls": state["tool_calls"] + 1}
 
         if state["tool_calls"] >= state["max_tool_calls"]:

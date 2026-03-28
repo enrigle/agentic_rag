@@ -120,7 +120,7 @@ def _chunk_text(
         # Oversized single paragraph: flush buffer then character-split the para
         if len(para) > size:
             if buf_paras:
-                _emit_chunk(chunks,buf_heading, buf_paras)
+                _emit_chunk(chunks, buf_heading, buf_paras)
                 buf_paras = []
                 buf_len = 0
             start = 0
@@ -132,13 +132,13 @@ def _chunk_text(
                         end = space
                 sub = para[start:end].strip()
                 if sub:
-                    _emit_chunk(chunks,buf_heading, [sub])
+                    _emit_chunk(chunks, buf_heading, [sub])
                 start = max(start + 1, end - overlap)
             continue
 
         # Adding this paragraph would exceed the size limit: flush first
         if buf_paras and buf_len + len(para) + 1 > size:
-            _emit_chunk(chunks,buf_heading, buf_paras)
+            _emit_chunk(chunks, buf_heading, buf_paras)
             # Carry the last paragraph forward as overlap context
             last = buf_paras[-1]
             buf_paras = [last] if len(last) + len(para) + 1 <= size else []
@@ -148,7 +148,7 @@ def _chunk_text(
         buf_len = sum(len(p) for p in buf_paras) + max(0, len(buf_paras) - 1)
 
     if buf_paras:
-        _emit_chunk(chunks,buf_heading, buf_paras)
+        _emit_chunk(chunks, buf_heading, buf_paras)
 
     return chunks
 
@@ -160,11 +160,13 @@ async def _caption_image(ollama_client: ollama.AsyncClient, url: str) -> str:
             image_bytes = resp.read()
         response = await ollama_client.chat(
             model=VISION_MODEL,
-            messages=[{
-                "role": "user",
-                "content": "Extract any text visible in this image. If it's a diagram or chart, describe what it shows. Be concise.",
-                "images": [image_bytes],
-            }],
+            messages=[
+                {
+                    "role": "user",
+                    "content": "Extract any text visible in this image. If it's a diagram or chart, describe what it shows. Be concise.",
+                    "images": [image_bytes],
+                }
+            ],
         )
         return response["message"]["content"].strip()
     except Exception as exc:
@@ -206,11 +208,15 @@ async def _fetch_text_from_blocks(
 
         if block_type == "image":
             img = block.get("image", {})
-            url = img.get("file", {}).get("url") or img.get("external", {}).get("url", "")
+            url = img.get("file", {}).get("url") or img.get("external", {}).get(
+                "url", ""
+            )
             if url:
                 caption = await _caption_image(ollama_client, url)
                 if caption:
-                    typed_lines.append({"type": "paragraph", "text": f"[Image: {caption}]"})
+                    typed_lines.append(
+                        {"type": "paragraph", "text": f"[Image: {caption}]"}
+                    )
             continue
 
         # child_page: add title as a reference but skip recursing
@@ -218,7 +224,9 @@ async def _fetch_text_from_blocks(
         if block_type == "child_page":
             child_title = block.get("child_page", {}).get("title", "")
             if child_title:
-                typed_lines.append({"type": "paragraph", "text": f"[Sub-page: {child_title}]"})
+                typed_lines.append(
+                    {"type": "paragraph", "text": f"[Sub-page: {child_title}]"}
+                )
             continue
 
         # child_database: skip content, just note its existence
@@ -269,9 +277,7 @@ async def ingest(args: argparse.Namespace) -> None:
         metadatas: list[dict[str, Any]] = all_chunks["metadatas"] or []
         page_ids = {m["page_id"] for m in metadatas if m and "page_id" in m}
         times = sorted(
-            m["last_edited_time"]
-            for m in metadatas
-            if m and m.get("last_edited_time")
+            m["last_edited_time"] for m in metadatas if m and m.get("last_edited_time")
         )
         print(f"Total chunks  : {len(metadatas)}")
         print(f"Distinct pages: {len(page_ids)}")
@@ -293,7 +299,9 @@ async def ingest(args: argparse.Namespace) -> None:
 
     # Prune chunks for pages that no longer exist in Notion
     all_chunks = collection.get(include=["metadatas"])
-    indexed_ids = {m["page_id"] for m in all_chunks["metadatas"] if m and "page_id" in m}
+    indexed_ids = {
+        m["page_id"] for m in all_chunks["metadatas"] if m and "page_id" in m
+    }
     live_ids = {p["id"] for p in pages}
     stale_ids = indexed_ids - live_ids
     if stale_ids:
@@ -343,7 +351,9 @@ async def ingest(args: argparse.Namespace) -> None:
                 embed_resp = await ollama_client.embed(model=EMBED_MODEL, input=chunk)
                 vector: list[float] = embed_resp["embeddings"][0]
             except Exception as exc:
-                logger.warning("Embedding failed for chunk %d of '%s': %s", i, title, exc)
+                logger.warning(
+                    "Embedding failed for chunk %d of '%s': %s", i, title, exc
+                )
                 continue
 
             ids.append(f"{page_id}_chunk_{i}")
@@ -369,13 +379,17 @@ async def ingest(args: argparse.Namespace) -> None:
             logger.info("Indexed '%s': %d chunk(s)", title, len(ids))
 
     _rebuild_bm25(collection)
-    print(f"Done. Indexed {len(pages)} pages, {total_chunks} chunks into ChromaDB at {CHROMA_PATH!r}.")
+    print(
+        f"Done. Indexed {len(pages)} pages, {total_chunks} chunks into ChromaDB at {CHROMA_PATH!r}."
+    )
 
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     parser = argparse.ArgumentParser(description="Notion → ChromaDB ingestion")
     parser.add_argument("--full", action="store_true", help="Force full re-index")
-    parser.add_argument("--status", action="store_true", help="Print collection stats and exit")
+    parser.add_argument(
+        "--status", action="store_true", help="Print collection stats and exit"
+    )
     args = parser.parse_args()
     asyncio.run(ingest(args))

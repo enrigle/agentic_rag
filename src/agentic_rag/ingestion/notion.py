@@ -7,9 +7,9 @@ import logging
 import os
 import urllib.request
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
-import bm25s
+import bm25s  # type: ignore[import-untyped]
 import chromadb
 import ollama
 from dotenv import load_dotenv
@@ -80,14 +80,13 @@ class NotionIngester(BaseIngester):
 
         # Prune chunks for pages that no longer exist in Notion
         all_chunks = self._collection.get(include=["metadatas"])
-        indexed_ids = {
-            m["page_id"] for m in all_chunks["metadatas"] if m and "page_id" in m
-        }
+        _metadatas: list[Mapping[str, Any]] = list(all_chunks["metadatas"] or [])
+        indexed_ids = {m["page_id"] for m in _metadatas if m and "page_id" in m}
         live_ids = {p["id"] for p in pages}
         stale_ids = indexed_ids - live_ids
         if stale_ids:
             stale_chunks = self._collection.get(
-                where={"page_id": {"$in": list(stale_ids)}}
+                where={"page_id": {"$in": list(stale_ids)}}  # type: ignore[dict-item]
             )
             self._collection.delete(ids=stale_chunks["ids"])
             logger.info(
@@ -112,21 +111,20 @@ class NotionIngester(BaseIngester):
                     where={"page_id": page_id},
                     include=["metadatas"],
                 )
+                _existing_metas: list[Mapping[str, Any]] = list(
+                    existing["metadatas"] or []
+                )
                 if (
                     existing["ids"]
-                    and existing["metadatas"][0].get("last_edited_time")
-                    == last_edited_time
+                    and _existing_metas
+                    and _existing_metas[0].get("last_edited_time") == last_edited_time
                 ):
                     logger.debug("Page '%s' unchanged — skipping", title)
                     continue
 
-            blocks = await self._fetch_text_from_blocks(
-                notion, ollama_client, page_id
-            )
+            blocks = await self._fetch_text_from_blocks(notion, ollama_client, page_id)
             if not blocks:
-                logger.debug(
-                    "Page '%s' produced no indexable text — skipping", title
-                )
+                logger.debug("Page '%s' produced no indexable text — skipping", title)
                 continue
 
             chunks = _chunk_text(
@@ -168,9 +166,9 @@ class NotionIngester(BaseIngester):
                     self._collection.delete(ids=existing_for_page["ids"])
                 self._collection.upsert(
                     ids=ids,
-                    embeddings=embeddings,
+                    embeddings=embeddings,  # type: ignore[arg-type]
                     documents=documents,
-                    metadatas=chunk_metadatas,
+                    metadatas=chunk_metadatas,  # type: ignore[arg-type]
                 )
                 total_chunks += len(ids)
                 logger.info("Indexed '%s': %d chunk(s)", title, len(ids))
@@ -191,7 +189,7 @@ class NotionIngester(BaseIngester):
             A dict with keys: total_chunks, distinct_pages, oldest_edit, newest_edit.
         """
         all_chunks = self._collection.get(include=["metadatas"])
-        metadatas: list[dict[str, Any]] = all_chunks["metadatas"] or []
+        metadatas: list[Mapping[str, Any]] = list(all_chunks["metadatas"] or [])
         page_ids = {m["page_id"] for m in metadatas if m and "page_id" in m}
         times = sorted(
             m["last_edited_time"] for m in metadatas if m and m.get("last_edited_time")
@@ -224,9 +222,7 @@ class NotionIngester(BaseIngester):
         (bm25_path / "id_map.json").write_text(json.dumps(ids))
         logger.info("BM25 index saved: %d documents", len(documents))
 
-    async def _caption_image(
-        self, ollama_client: ollama.AsyncClient, url: str
-    ) -> str:
+    async def _caption_image(self, ollama_client: ollama.AsyncClient, url: str) -> str:
         """Download image and return a text caption via the configured vision model.
 
         NOTE: Uses ollama.AsyncClient directly because BaseLLM.embed() does not
@@ -290,9 +286,9 @@ class NotionIngester(BaseIngester):
 
             if block_type == "image":
                 img = block.get("image", {})
-                url = img.get("file", {}).get("url") or img.get(
-                    "external", {}
-                ).get("url", "")
+                url = img.get("file", {}).get("url") or img.get("external", {}).get(
+                    "url", ""
+                )
                 if url:
                     caption = await self._caption_image(ollama_client, url)
                     if caption:
