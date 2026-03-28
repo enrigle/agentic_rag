@@ -1,5 +1,7 @@
 """Notion → ChromaDB ingestion via NotionIngester."""
 
+import asyncio
+import functools
 import json
 import logging
 import os
@@ -22,8 +24,6 @@ from agentic_rag.ingestion.chunker import (
     _get_title,
 )
 from agentic_rag.llm.base import BaseLLM
-
-load_dotenv()
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +60,7 @@ class NotionIngester(BaseIngester):
         Raises:
             RuntimeError: If NOTION_TOKEN environment variable is not set.
         """
+        load_dotenv()
         token = os.environ.get("NOTION_TOKEN")
         if not token:
             raise RuntimeError("NOTION_TOKEN environment variable is not set")
@@ -161,6 +162,10 @@ class NotionIngester(BaseIngester):
                 )
 
             if ids:
+                # Delete existing chunks for this page before upserting new ones
+                existing_for_page = self._collection.get(where={"page_id": page_id})
+                if existing_for_page["ids"]:
+                    self._collection.delete(ids=existing_for_page["ids"])
                 self._collection.upsert(
                     ids=ids,
                     embeddings=embeddings,
@@ -228,8 +233,13 @@ class NotionIngester(BaseIngester):
         support vision/multimodal inputs.
         """
         try:
-            with urllib.request.urlopen(url, timeout=10) as resp:
-                image_bytes = resp.read()
+            loop = asyncio.get_running_loop()
+
+            def _fetch() -> bytes:
+                with urllib.request.urlopen(url, timeout=10) as resp:
+                    return resp.read()  # type: ignore[no-any-return]
+
+            image_bytes = await loop.run_in_executor(None, functools.partial(_fetch))
             response = await ollama_client.chat(
                 model=self._config.ingestion.vision_model,
                 messages=[
@@ -240,7 +250,7 @@ class NotionIngester(BaseIngester):
                     }
                 ],
             )
-            return response["message"]["content"].strip()  # type: ignore[index]
+            return response.message.content.strip() if response.message.content else ""
         except Exception as exc:
             logger.warning("Image captioning failed (%s): %s", url, exc)
             return ""

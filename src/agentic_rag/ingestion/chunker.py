@@ -64,8 +64,8 @@ def _chunk_text(
     tagged: list[tuple[str, str]] = []
     current_heading = ""
     for block in blocks:
-        block_type = block["type"]
-        text = block["text"].strip()
+        block_type = block.get("type", "")
+        text = block.get("text", "").strip()
         if not text:
             continue
         if block_type in HEADING_BLOCK_TYPES:
