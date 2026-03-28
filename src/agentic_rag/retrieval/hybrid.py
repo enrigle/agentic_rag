@@ -7,7 +7,6 @@ import logging
 from agentic_rag.config import RAGConfig
 from agentic_rag.models import SearchResult
 from agentic_rag.retrieval.base import BaseKeywordRetriever, BaseVectorStore
-from agentic_rag.retrieval.chroma import ChromaVectorStore
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +35,7 @@ def _rrf_merge(
     for rank, doc_id in enumerate(bm25_ids):
         scores[doc_id] = scores.get(doc_id, 0.0) + 1.0 / (k + rank + 1)
     merged = sorted(scores, key=lambda x: scores[x], reverse=True)[:top_n]
-    return merged, scores
+    return merged, {fid: scores[fid] for fid in merged}
 
 
 class HybridRetriever:
@@ -74,6 +73,7 @@ class HybridRetriever:
         cfg = self._config.retriever
 
         # --- Vector search ---
+        # Use bm25_top_k as the vector candidate pool size too (independently tunable via config if needed)
         vector_results = await self._vector_store.search(
             query_vec, top_k=cfg.bm25_top_k
         )
@@ -106,7 +106,7 @@ class HybridRetriever:
 
         # --- Fetch data for BM25-only IDs ---
         missing_ids = [fid for fid in merged_ids if fid not in vector_data]
-        if missing_ids and isinstance(self._vector_store, ChromaVectorStore):
+        if missing_ids:
             fetched = await self._vector_store.fetch_by_ids(missing_ids)
             for result in fetched:
                 vector_data[result.id] = result

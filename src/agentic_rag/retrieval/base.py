@@ -15,6 +15,11 @@ class BaseVectorStore(ABC):
         ...
 
     @abstractmethod
+    async def fetch_by_ids(self, ids: list[str]) -> list[SearchResult]:
+        """Fetch documents by ID without requiring a query vector."""
+        ...
+
+    @abstractmethod
     def upsert(
         self,
         ids: list[str],

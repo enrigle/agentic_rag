@@ -21,7 +21,10 @@ class ChromaVectorStore(BaseVectorStore):
     def __init__(self, config: RAGConfig) -> None:
         self._min_similarity: float = config.retriever.min_similarity
         client = chromadb.PersistentClient(path=config.chroma_path)
-        self._collection = client.get_or_create_collection(config.collection_name)
+        self._collection = client.get_or_create_collection(
+            config.collection_name,
+            metadata={"hnsw:space": "cosine"},
+        )
 
     async def search(self, query_vec: list[float], top_k: int) -> list[SearchResult]:
         """Query the collection and filter results by min_similarity threshold.
@@ -131,6 +134,12 @@ class ChromaVectorStore(BaseVectorStore):
         if not ids:
             logger.warning("ChromaVectorStore.upsert: called with empty ids — no-op")
             return
+        if not (len(ids) == len(embeddings) == len(documents) == len(metadatas)):
+            raise ValueError(
+                f"upsert: parallel lists must be equal length, got "
+                f"ids={len(ids)}, embeddings={len(embeddings)}, "
+                f"documents={len(documents)}, metadatas={len(metadatas)}"
+            )
         self._collection.upsert(
             ids=ids,
             embeddings=embeddings,  # type: ignore[arg-type]
