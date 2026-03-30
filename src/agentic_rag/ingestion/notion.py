@@ -60,6 +60,8 @@ class NotionIngester(BaseIngester):
         Raises:
             RuntimeError: If NOTION_TOKEN environment variable is not set.
         """
+        # TODO: Consider supporting OAuth or other auth methods in the future
+        # TODO: Consider refactoring to allow ingesting specific pages or databases instead of all pages
         load_dotenv()
         token = os.environ.get("NOTION_TOKEN")
         if not token:

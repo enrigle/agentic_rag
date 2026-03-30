@@ -3,6 +3,7 @@
 These functions are stateless and perform no I/O.
 """
 
+from dataclasses import dataclass, field
 from typing import Any
 
 # Block types that contain rich_text content worth indexing
@@ -20,6 +21,51 @@ RICH_TEXT_BLOCK_TYPES = {
 }
 
 HEADING_BLOCK_TYPES = {"heading_1", "heading_2", "heading_3"}
+
+
+@dataclass(slots=True)
+class _ChunkBuffer:
+    chunks: list[str]
+    size: int
+    overlap: int
+    heading: str = ""
+    paras: list[str] = field(default_factory=list)
+    length: int = 0
+
+    def flush(self) -> None:
+        if not self.paras:
+            return
+        _emit_chunk(self.chunks, self.heading, self.paras)
+        self.paras = []
+        self.length = 0
+
+    def set_heading(self, heading: str) -> None:
+        if heading != self.heading and self.paras:
+            self.flush()
+        self.heading = heading
+
+    def _overlap_carry_from_last_paragraph(self) -> str:
+        if self.overlap <= 0 or not self.paras:
+            return ""
+        last_para = self.paras[-1]
+        if len(last_para) <= self.overlap:
+            return last_para
+        return last_para[-self.overlap :].lstrip()
+
+    def flush_with_overlap_seed(self, next_para: str, next_para_len: int) -> None:
+        if not self.paras:
+            return
+
+        carry = self._overlap_carry_from_last_paragraph()
+        self.flush()
+
+        if carry and (len(carry) + 1 + next_para_len <= self.size):
+            self.paras = [carry]
+            self.length = len(carry)
+
+    def append(self, paragraph: str, paragraph_len: int) -> None:
+        self.length += paragraph_len + (1 if self.paras else 0)
+        self.paras.append(paragraph)
 
 
 def _extract_plain_text(block: dict[str, Any]) -> str:
@@ -43,6 +89,41 @@ def _get_title(page: dict[str, Any]) -> str:
 def _emit_chunk(chunks: list[str], heading: str, paras: list[str]) -> None:
     prefix = f"{heading}\n" if heading else ""
     chunks.append(prefix + "\n".join(paras))
+
+
+def _split_long_text(text: str, size: int, overlap: int) -> list[str]:
+    # Split *text* into chunks of at most *size* characters, with optional *overlap*.
+    if not text:
+        return []
+    if size <= 0:
+        return [text]
+    if overlap < 0:
+        overlap = 0
+
+    out: list[str] = []
+    n = len(text)
+    start = 0
+    while start < n:
+        end = min(start + size, n)
+        if end < n:
+            cut = text.rfind(" ", start, end)
+            if cut > start:
+                end = cut
+        if end <= start:
+            end = min(start + size, n)
+
+        chunk = text[start:end].strip()
+        if chunk:
+            out.append(chunk)
+
+        next_start = end - overlap
+        if next_start <= start:
+            next_start = end
+        start = next_start
+        while start < n and text[start].isspace():
+            start += 1
+
+    return out
 
 
 def _chunk_text(
@@ -77,45 +158,26 @@ def _chunk_text(
         return []
 
     chunks: list[str] = []
-    buf_paras: list[str] = []
-    buf_heading = ""
-    buf_len = 0
+    buf = _ChunkBuffer(chunks=chunks, size=size, overlap=overlap)
 
     for heading, para in tagged:
-        if heading:
-            buf_heading = heading
+        buf.set_heading(heading)
+
+        para_len = len(para)
 
         # Oversized single paragraph: flush buffer then character-split the para
-        if len(para) > size:
-            if buf_paras:
-                _emit_chunk(chunks, buf_heading, buf_paras)
-                buf_paras = []
-                buf_len = 0
-            start = 0
-            while start < len(para):
-                end = start + size
-                if end < len(para):
-                    space = para.rfind(" ", start, end)
-                    if space > start:
-                        end = space
-                sub = para[start:end].strip()
-                if sub:
-                    _emit_chunk(chunks, buf_heading, [sub])
-                start = max(start + 1, end - overlap)
+        if para_len > size:
+            buf.flush()
+            for sub in _split_long_text(para, size=size, overlap=overlap):
+                _emit_chunk(chunks, buf.heading, [sub])
             continue
 
         # Adding this paragraph would exceed the size limit: flush first
-        if buf_paras and buf_len + len(para) + 1 > size:
-            _emit_chunk(chunks, buf_heading, buf_paras)
-            # Carry the last paragraph forward as overlap context
-            last = buf_paras[-1]
-            buf_paras = [last] if len(last) + len(para) + 1 <= size else []
-            buf_len = len(buf_paras[0]) if buf_paras else 0
+        if buf.paras and (buf.length + 1 + para_len > size):
+            buf.flush_with_overlap_seed(para, para_len)
 
-        buf_paras.append(para)
-        buf_len = sum(len(p) for p in buf_paras) + max(0, len(buf_paras) - 1)
+        buf.append(para, para_len)
 
-    if buf_paras:
-        _emit_chunk(chunks, buf_heading, buf_paras)
+    buf.flush()
 
     return chunks
