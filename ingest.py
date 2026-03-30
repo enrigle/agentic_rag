@@ -21,9 +21,13 @@ from dotenv import load_dotenv
 
 load_dotenv()  # loads .env from cwd (or any parent dir)
 
+import io
+
 import bm25s
 import chromadb
 import ollama
+import pytesseract
+from PIL import Image
 from notion_client import AsyncClient
 from notion_client.helpers import async_collect_paginated_api
 
@@ -33,7 +37,6 @@ CHROMA_PATH = "./chroma_db"
 BM25_PATH = "./bm25_index"
 COLLECTION_NAME = "notion_kb"
 EMBED_MODEL = "nomic-embed-text"
-VISION_MODEL = "llava"
 CHUNK_SIZE = 800
 CHUNK_OVERLAP = 100
 
@@ -153,22 +156,13 @@ def _chunk_text(
     return chunks
 
 
-async def _caption_image(ollama_client: ollama.AsyncClient, url: str) -> str:
-    """Download image and return a text caption via vision model."""
+def _caption_image(url: str) -> str:
+    """Download image and extract visible text via OCR."""
     try:
         with urllib.request.urlopen(url, timeout=10) as resp:
             image_bytes = resp.read()
-        response = await ollama_client.chat(
-            model=VISION_MODEL,
-            messages=[
-                {
-                    "role": "user",
-                    "content": "Extract any text visible in this image. If it's a diagram or chart, describe what it shows. Be concise.",
-                    "images": [image_bytes],
-                }
-            ],
-        )
-        return response["message"]["content"].strip()
+        image = Image.open(io.BytesIO(image_bytes))
+        return pytesseract.image_to_string(image).strip()
     except Exception as exc:
         logger.warning("Image captioning failed (%s): %s", url, exc)
         return ""
@@ -176,7 +170,6 @@ async def _caption_image(ollama_client: ollama.AsyncClient, url: str) -> str:
 
 async def _fetch_text_from_blocks(
     notion: AsyncClient,
-    ollama_client: ollama.AsyncClient,
     block_id: str,
     depth: int = 0,
     max_depth: int = 10,
@@ -212,7 +205,7 @@ async def _fetch_text_from_blocks(
                 "url", ""
             )
             if url:
-                caption = await _caption_image(ollama_client, url)
+                caption = _caption_image(url)
                 if caption:
                     typed_lines.append(
                         {"type": "paragraph", "text": f"[Image: {caption}]"}
@@ -236,7 +229,7 @@ async def _fetch_text_from_blocks(
         # Recursively fetch nested children (toggles, callouts, nested lists, etc.)
         if block.get("has_children"):
             child_blocks = await _fetch_text_from_blocks(
-                notion, ollama_client, block["id"], depth + 1, max_depth
+                notion, block["id"], depth + 1, max_depth
             )
             typed_lines.extend(child_blocks)
 
@@ -334,7 +327,7 @@ async def ingest(args: argparse.Namespace) -> None:
                 logger.debug("Page '%s' unchanged — skipping", title)
                 continue
 
-        blocks = await _fetch_text_from_blocks(notion, ollama_client, page_id)
+        blocks = await _fetch_text_from_blocks(notion, page_id)
         if not blocks:
             logger.debug("Page '%s' produced no indexable text — skipping", title)
             continue
