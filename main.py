@@ -128,10 +128,15 @@ class AgenticRAGSystem:
             }
 
         prompt = (
-            "You are a query classifier. Respond with ONLY valid JSON, no prose. "
+            "You are a query classifier. Respond with ONLY valid JSON, no prose.\n"
             'Format: {"needs_web_search": <bool>, "reason": "<str>"}\n\n'
-            "Does this query require current web information "
-            "or can it be answered from a static knowledge base?\n\n"
+            "Rule: Set needs_web_search=true for queries about current/live data "
+            "(time, weather, news, prices, scores, events). "
+            "Set needs_web_search=false for factual or how-to questions.\n\n"
+            "Examples:\n"
+            '  Q: "what time is it in tokyo?" → {"needs_web_search": true, "reason": "current time requires live data"}\n'
+            '  Q: "what is the weather in madrid?" → {"needs_web_search": true, "reason": "weather requires live data"}\n'
+            '  Q: "how do I deploy a flask app?" → {"needs_web_search": false, "reason": "factual how-to question"}\n\n'
             f"Query: {state['query']}"
         )
 
@@ -140,6 +145,10 @@ class AgenticRAGSystem:
             start = text.find("{")
             end = text.rfind("}") + 1
             parsed = json.loads(text[start:end])
+            if "needs_web_search" not in parsed:
+                logger.warning(
+                    "analyze_query: 'needs_web_search' key missing in response; defaulting to False"
+                )
             needs_web_search = bool(parsed.get("needs_web_search", False))
             logger.info(
                 "analyze_query: needs_web_search=%s reason=%s",
@@ -284,6 +293,23 @@ class AgenticRAGSystem:
                 for fid in merged_ids
                 if fid in vector_data
             ]
+
+            # Escalate to web search if top RRF score is below confidence threshold
+            RAG_CONFIDENCE_THRESHOLD = 0.015
+            if rag_results:
+                best_score = max(r["score"] for r in rag_results)
+                if best_score < RAG_CONFIDENCE_THRESHOLD:
+                    logger.info(
+                        "rag_search: top RRF score %.6f below threshold %.3f — escalating to web search",
+                        best_score,
+                        RAG_CONFIDENCE_THRESHOLD,
+                    )
+                    return {
+                        **state,
+                        "rag_results": rag_results,
+                        "needs_web_search": True,
+                        "tool_calls": state["tool_calls"] + 1,
+                    }
 
             logger.info(
                 "rag_search: hybrid returned %d results (vector=%d, bm25=%d)",

@@ -9,9 +9,11 @@ def get_system() -> AgenticRAGSystem:
 
 
 st.title("Agentic RAG")
-query = st.text_input("Ask a question")
+with st.form("search_form"):
+    query = st.text_input("Ask a question")
+    submitted = st.form_submit_button("Search")
 
-if st.button("Search") and query:
+if submitted and query:
     with st.spinner("Thinking..."):
         result = asyncio.run(get_system().query(query))
 
