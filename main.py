@@ -60,7 +60,6 @@ class AgenticRAGSystem:
         chroma_path: str = "./chroma_db",
     ) -> None:
         self.model = model
-        self.client = ollama.AsyncClient()
         self.max_tool_calls = max_tool_calls
         self.embed_model = "nomic-embed-text"
         self.chroma = chromadb.PersistentClient(path=chroma_path)
@@ -89,10 +88,11 @@ class AgenticRAGSystem:
 
     async def _invoke_ollama(self, prompt: str) -> str:
         """Call local Ollama daemon asynchronously."""
-        response = await self.client.chat(
-            model=self.model,
-            messages=[{"role": "user", "content": prompt}],
-        )
+        async with ollama.AsyncClient() as client:
+            response = await client.chat(
+                model=self.model,
+                messages=[{"role": "user", "content": prompt}],
+            )
         return response.message.content  # type: ignore[return-value]
 
     def _build_graph(self) -> CompiledStateGraph:
@@ -196,9 +196,10 @@ class AgenticRAGSystem:
 
         try:
             # --- Vector search ---
-            embed_resp = await self.client.embed(
-                model=self.embed_model, input=state["query"]
-            )
+            async with ollama.AsyncClient() as client:
+                embed_resp = await client.embed(
+                    model=self.embed_model, input=state["query"]
+                )
             query_vec: list[float] = embed_resp["embeddings"][0]
 
             loop = asyncio.get_running_loop()
