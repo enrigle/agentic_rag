@@ -1,4 +1,10 @@
 # Agentic RAG
+##TODO: Add docker
+##TODO: Add minikube
+##TODO: Add some cloud options to expose the RAG app
+##TODO: Add Langfuse for evaluations. Possible to do in the front-end?
+##TODO: Is there a way to test the chunking length from the front-end?
+
 
 Local agentic RAG system using LangGraph, Ollama (llama3.2), and a Notion knowledge base. No cloud credentials required.
 
