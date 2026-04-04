@@ -88,11 +88,10 @@ class AgenticRAGSystem:
 
     async def _invoke_ollama(self, prompt: str) -> str:
         """Call local Ollama daemon asynchronously."""
-        async with ollama.AsyncClient() as client:
-            response = await client.chat(
-                model=self.model,
-                messages=[{"role": "user", "content": prompt}],
-            )
+        response = await ollama.AsyncClient().chat(
+            model=self.model,
+            messages=[{"role": "user", "content": prompt}],
+        )
         return response.message.content  # type: ignore[return-value]
 
     def _build_graph(self) -> CompiledStateGraph:
@@ -196,10 +195,9 @@ class AgenticRAGSystem:
 
         try:
             # --- Vector search ---
-            async with ollama.AsyncClient() as client:
-                embed_resp = await client.embed(
-                    model=self.embed_model, input=state["query"]
-                )
+            embed_resp = await ollama.AsyncClient().embed(
+                model=self.embed_model, input=state["query"]
+            )
             query_vec: list[float] = embed_resp["embeddings"][0]
 
             loop = asyncio.get_running_loop()
