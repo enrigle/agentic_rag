@@ -30,8 +30,8 @@ def tune_retrieval_params(entries: list[FeedbackEntry]) -> float | None:
     Returns the midpoint between median thumbs-up and thumbs-down top_score,
     or None if there is insufficient signal.
     """
-    up = [e.top_score for e in entries if e.rating == 1 and e.top_score > 0]
-    down = [e.top_score for e in entries if e.rating == -1 and e.top_score > 0]
+    up = [e.top_score for e in entries if e.rating == 1]
+    down = [e.top_score for e in entries if e.rating == -1]
     if not up or not down:
         return None
     median_up = statistics.median(up)
@@ -73,10 +73,14 @@ def apply_optimization(
 
     # 2. Few-shot examples
     examples = get_few_shot_examples(entries)
-    feedback_config_path.write_text(
-        json.dumps({"few_shot_examples": examples}, indent=2, ensure_ascii=False)
-    )
-    logger.info("optimizer: wrote %d few-shot examples", len(examples))
+    try:
+        feedback_config_path.write_text(
+            json.dumps({"few_shot_examples": examples}, indent=2, ensure_ascii=False)
+        )
+        logger.info("optimizer: wrote %d few-shot examples", len(examples))
+    except OSError as exc:
+        logger.warning("optimizer: failed to write feedback config: %s", exc)
+        examples = []
 
     # 3. KB gaps
     gaps = get_kb_gaps(entries)

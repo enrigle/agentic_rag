@@ -111,3 +111,14 @@ def test_apply_optimization_updates_yaml_when_signal(tmp_path: Path) -> None:
 
         raw = yaml.safe_load(config_path.read_text())
         assert raw["retriever"]["min_similarity"] == result.new_min_similarity
+
+
+def test_apply_optimization_yaml_write_failure_clears_min_sim(tmp_path: Path) -> None:
+    # config_path parent doesn't exist — read_text() raises FileNotFoundError
+    config_path = tmp_path / "nonexistent_dir" / "default.yaml"
+    fb_config_path = tmp_path / "feedback_config.json"
+    entries = [_entry(1, 0.8), _entry(-1, 0.1)]
+    result = apply_optimization(
+        entries, config_path=config_path, feedback_config_path=fb_config_path
+    )
+    assert result.new_min_similarity is None
