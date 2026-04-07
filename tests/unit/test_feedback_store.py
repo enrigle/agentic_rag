@@ -50,3 +50,10 @@ def test_multiple_entries_oldest_first(tmp_path: Path) -> None:
         )
     entries = get_all(db_path=db)
     assert [e.query for e in entries] == ["q0", "q1", "q2"]
+
+
+def test_update_category_nonexistent_id_is_noop(tmp_path: Path) -> None:
+    db = tmp_path / "test.db"
+    # No error raised, no rows affected — silent no-op
+    update_category(999, "retrieval_miss", db_path=db)
+    assert get_all(db_path=db) == []

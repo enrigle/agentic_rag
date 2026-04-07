@@ -47,6 +47,8 @@ def _ensure_table(conn: sqlite3.Connection) -> None:
 
 def save(entry: FeedbackEntry, db_path: Path = DB_PATH) -> int:
     """Persist a FeedbackEntry. Returns the new row id."""
+    if entry.rating not in (1, -1):
+        raise ValueError(f"rating must be 1 or -1, got {entry.rating!r}")
     with sqlite3.connect(db_path) as conn:
         _ensure_table(conn)
         cursor = conn.execute(
@@ -64,7 +66,10 @@ def save(entry: FeedbackEntry, db_path: Path = DB_PATH) -> int:
             ),
         )
         conn.commit()
-        return cursor.lastrowid  # type: ignore[return-value]
+        row_id = cursor.lastrowid
+        if row_id is None:
+            raise RuntimeError("INSERT succeeded but returned no lastrowid")
+        return row_id
 
 
 def get_all(db_path: Path = DB_PATH) -> list[FeedbackEntry]:
@@ -94,6 +99,7 @@ def get_all(db_path: Path = DB_PATH) -> list[FeedbackEntry]:
 def update_category(entry_id: int, category: str, db_path: Path = DB_PATH) -> None:
     """Write the judge's classification back to the row."""
     with sqlite3.connect(db_path) as conn:
+        _ensure_table(conn)
         conn.execute(
             "UPDATE feedback SET category = ? WHERE id = ?",
             (category, entry_id),
