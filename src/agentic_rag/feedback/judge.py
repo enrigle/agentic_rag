@@ -58,6 +58,9 @@ async def classify_failure(
         text: str = response["message"]["content"]
         start = text.find("{")
         end = text.rfind("}") + 1
+        if start == -1 or end == 0:
+            logger.warning("judge: no JSON object found in response")
+            return "unknown"
         parsed: dict = json.loads(text[start:end])
         category: str = parsed.get("category", "unknown")
         if category not in _VALID_CATEGORIES:

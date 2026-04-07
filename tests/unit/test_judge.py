@@ -69,3 +69,29 @@ async def test_classify_exception_returns_unknown() -> None:
     with patch("agentic_rag.feedback.judge.ollama.AsyncClient", return_value=mock_ctx):
         result = await classify_failure(query="q", answer="a", sources=[])
     assert result == "unknown"
+
+
+@pytest.mark.asyncio
+async def test_classify_invalid_category_returns_unknown() -> None:
+    mock_ctx = MagicMock()
+    mock_ctx.__aenter__ = AsyncMock(return_value=mock_ctx)
+    mock_ctx.__aexit__ = AsyncMock(return_value=False)
+    mock_ctx.chat = AsyncMock(
+        return_value={"message": {"content": '{"category": "hallucination"}'}}
+    )
+    with patch("agentic_rag.feedback.judge.ollama.AsyncClient", return_value=mock_ctx):
+        result = await classify_failure(query="q", answer="a", sources=[])
+    assert result == "unknown"
+
+
+@pytest.mark.asyncio
+async def test_classify_no_braces_returns_unknown() -> None:
+    mock_ctx = MagicMock()
+    mock_ctx.__aenter__ = AsyncMock(return_value=mock_ctx)
+    mock_ctx.__aexit__ = AsyncMock(return_value=False)
+    mock_ctx.chat = AsyncMock(
+        return_value={"message": {"content": "Sorry, I cannot classify this."}}
+    )
+    with patch("agentic_rag.feedback.judge.ollama.AsyncClient", return_value=mock_ctx):
+        result = await classify_failure(query="q", answer="a", sources=[])
+    assert result == "unknown"
