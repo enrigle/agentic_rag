@@ -14,7 +14,7 @@ from agentic_rag.feedback.store import FeedbackEntry
 
 logger = logging.getLogger(__name__)
 
-_MIN_SCORE_SEPARATION = 0.005  # ignore signal if medians are this close
+_MIN_SCORE_SEPARATION = 0.05  # ignore signal if medians are this close
 
 
 @dataclass
