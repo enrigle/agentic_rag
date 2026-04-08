@@ -409,9 +409,23 @@ class AgenticRAGSystem:
             for i, r in enumerate(all_results)
         )
 
+        few_shot_str = ""
+        fc_path = Path("feedback_config.json")
+        if fc_path.exists():
+            try:
+                fc = json.loads(fc_path.read_text())
+                examples = fc.get("few_shot_examples", [])[:3]
+                if examples:
+                    few_shot_str = "\n\nExamples of good answers:\n" + "\n\n".join(
+                        f"Q: {ex['query']}\nA: {ex['answer']}" for ex in examples
+                    )
+            except (json.JSONDecodeError, KeyError):
+                pass
+
         prompt = (
             "You are a helpful assistant. Answer using ONLY the provided context. "
-            "Cite sources inline using [N] notation. Do not fabricate information.\n\n"
+            "Cite sources inline using [N] notation. Do not fabricate information."
+            f"{few_shot_str}\n\n"
             f"Context:\n{context_blocks}\n\nQuestion: {state['query']}"
         )
 
@@ -470,16 +484,25 @@ class AgenticRAGSystem:
 
         rag_results = final_state.get("rag_results") or []
         web_results = final_state.get("web_results") or []
+        all_results = rag_results + web_results
         sources = [
-            {"index": i + 1, "title": r["title"], "url": r["source"]}
-            for i, r in enumerate(rag_results + web_results)
+            {
+                "index": i + 1,
+                "title": r["title"],
+                "url": r["source"],
+                "content": r.get("content", ""),
+                "score": r.get("score", 0.0),
+            }
+            for i, r in enumerate(all_results)
         ]
+        top_score = max((r.get("score", 0.0) for r in rag_results), default=0.0)
 
         return {
             "answer": final_state.get("final_answer") or "",
             "sources": sources,
             "tool_calls_used": final_state["tool_calls"],
             "latency_ms": round(latency_ms, 2),
+            "top_score": top_score,
         }
 
 
