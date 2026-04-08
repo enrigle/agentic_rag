@@ -410,16 +410,19 @@ class AgenticRAGSystem:
         )
 
         few_shot_str = ""
-        fc_path = Path("feedback_config.json")
+        fc_path = Path(__file__).parent / "feedback_config.json"
         if fc_path.exists():
             try:
                 fc = json.loads(fc_path.read_text())
-                examples = fc.get("few_shot_examples", [])[:3]
-                if examples:
-                    few_shot_str = "\n\nExamples of good answers:\n" + "\n\n".join(
-                        f"Q: {ex['query']}\nA: {ex['answer']}" for ex in examples
-                    )
-            except (json.JSONDecodeError, KeyError):
+                parts = []
+                for ex in fc.get("few_shot_examples", [])[:3]:
+                    try:
+                        parts.append(f"Q: {ex['query']}\nA: {ex['answer']}")
+                    except KeyError:
+                        continue
+                if parts:
+                    few_shot_str = "\n\nExamples of good answers:\n" + "\n\n".join(parts)
+            except json.JSONDecodeError:
                 pass
 
         prompt = (
