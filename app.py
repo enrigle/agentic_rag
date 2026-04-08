@@ -92,6 +92,7 @@ if st.session_state.get("result"):
 
         if col2.button("👎 Bad answer"):
             st.session_state.show_note = True
+            st.rerun()
 
         if st.session_state.get("show_note"):
             note = st.text_input("What was wrong? (optional)")
