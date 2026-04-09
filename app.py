@@ -1,10 +1,31 @@
 # app.py
 import asyncio
+import threading
+
 import streamlit as st
 from main import AgenticRAGSystem
+from agentic_rag.config import load_config
 from agentic_rag.feedback.store import FeedbackEntry, get_all, save, update_category
 from agentic_rag.feedback.judge import classify_failure
 from agentic_rag.feedback.optimizer import apply_optimization
+from agentic_rag.ingestion.notion import NotionIngester
+from agentic_rag.llm.ollama import OllamaLLM
+
+_sync_state: dict[str, object] = {"status": "idle", "chunks": 0, "error": ""}
+
+
+def _run_ingest() -> None:
+    """Run NotionIngester in background thread; writes result to _sync_state."""
+    try:
+        config = load_config()
+        llm = OllamaLLM(config.llm)
+        ingester = NotionIngester(config, llm)
+        total = asyncio.run(ingester.ingest(full=False))
+        _sync_state["chunks"] = total
+        _sync_state["status"] = "done"
+    except Exception as exc:  # noqa: BLE001
+        _sync_state["error"] = str(exc)
+        _sync_state["status"] = "error"
 
 
 @st.cache_resource
