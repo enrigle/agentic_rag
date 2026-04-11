@@ -1,5 +1,6 @@
 # app.py
 import asyncio
+import threading
 
 import streamlit as st
 from main import AgenticRAGSystem
@@ -32,6 +33,12 @@ def _run_ingest() -> None:
 def get_system() -> AgenticRAGSystem:
     return AgenticRAGSystem()
 
+
+# ── Background ingest (once per session) ───────────────────────────────────────
+if not st.session_state.get("sync_started"):
+    _sync_state["status"] = "syncing"
+    threading.Thread(target=_run_ingest, daemon=True).start()
+    st.session_state["sync_started"] = True
 
 # ── Sidebar ────────────────────────────────────────────────────────────────────
 with st.sidebar:
