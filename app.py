@@ -42,6 +42,15 @@ if not st.session_state.get("sync_started"):
 
 # ── Sidebar ────────────────────────────────────────────────────────────────────
 with st.sidebar:
+    st.header("Knowledge Base")
+    _status = _sync_state["status"]
+    if _status == "syncing":
+        st.caption("⟳ Syncing knowledge base...")
+    elif _status == "done":
+        st.caption(f"✓ Synced · {_sync_state['chunks']} chunks indexed")
+    elif _status == "error":
+        st.caption(f"✗ Sync failed: {_sync_state['error']}")
+
     st.header("Feedback")
 
     all_entries = get_all()
