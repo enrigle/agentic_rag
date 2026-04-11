@@ -1,4 +1,3 @@
-import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import app
@@ -32,4 +31,4 @@ def test_run_ingest_error() -> None:
         app._run_ingest()
 
     assert app._sync_state["status"] == "error"
-    assert "bad config" in app._sync_state["error"]
+    assert "bad config" in str(app._sync_state["error"])

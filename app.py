@@ -1,6 +1,5 @@
 # app.py
 import asyncio
-import threading
 
 import streamlit as st
 from main import AgenticRAGSystem
@@ -16,6 +15,7 @@ _sync_state: dict[str, object] = {"status": "idle", "chunks": 0, "error": ""}
 
 def _run_ingest() -> None:
     """Run NotionIngester in background thread; writes result to _sync_state."""
+    _sync_state.update({"chunks": 0, "error": ""})
     try:
         config = load_config()
         llm = OllamaLLM(config.llm)
