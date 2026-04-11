@@ -47,9 +47,11 @@ with st.sidebar:
     if _status == "syncing":
         st.caption("⟳ Syncing knowledge base...")
     elif _status == "done":
-        st.caption(f"✓ Synced · {_sync_state['chunks']} chunks indexed")
+        st.caption(f"✓ Synced · {int(_sync_state['chunks'])} chunks indexed")
     elif _status == "error":
         st.caption(f"✗ Sync failed: {_sync_state['error']}")
+    else:
+        st.caption("—")
 
     st.header("Feedback")
 
