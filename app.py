@@ -1,6 +1,7 @@
 # app.py
 import asyncio
 import threading
+from typing import TypedDict
 
 import streamlit as st
 from main import AgenticRAGSystem
@@ -11,7 +12,14 @@ from agentic_rag.feedback.optimizer import apply_optimization
 from agentic_rag.ingestion.notion import NotionIngester
 from agentic_rag.llm.ollama import OllamaLLM
 
-_sync_state: dict[str, object] = {"status": "idle", "chunks": 0, "error": ""}
+
+class _SyncState(TypedDict):
+    status: str
+    chunks: int
+    error: str
+
+
+_sync_state: _SyncState = {"status": "idle", "chunks": 0, "error": ""}
 
 
 def _run_ingest() -> None:
@@ -47,7 +55,7 @@ with st.sidebar:
     if _status == "syncing":
         st.caption("⟳ Syncing knowledge base...")
     elif _status == "done":
-        st.caption(f"✓ Synced · {int(_sync_state['chunks'])} chunks indexed")
+        st.caption(f"✓ Synced · {_sync_state['chunks']} chunks indexed")
     elif _status == "error":
         st.caption(f"✗ Sync failed: {_sync_state['error']}")
     else:
