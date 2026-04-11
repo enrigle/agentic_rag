@@ -291,7 +291,7 @@ class NotionIngester(BaseIngester):
                 url = img.get("file", {}).get("url") or img.get("external", {}).get(
                     "url", ""
                 )
-                if url:
+                if url and self._config.ingestion.vision_model:
                     caption = await self._caption_image(ollama_client, url)
                     if caption:
                         typed_lines.append(

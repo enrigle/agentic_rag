@@ -24,3 +24,5 @@ chroma_db/
 
 # BM25 document store
 bm25_index/
+
+*.db

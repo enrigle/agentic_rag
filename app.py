@@ -19,7 +19,12 @@ class _SyncState(TypedDict):
     error: str
 
 
-_sync_state: _SyncState = {"status": "idle", "chunks": 0, "error": ""}
+@st.cache_resource
+def _get_sync_state() -> _SyncState:
+    return {"status": "idle", "chunks": 0, "error": ""}
+
+
+_sync_state = _get_sync_state()
 
 
 def _run_ingest() -> None:

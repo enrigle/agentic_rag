@@ -17,4 +17,4 @@ retriever:
 ingestion:
   chunk_size: 800
   chunk_overlap: 100
-  vision_model: llava
+  vision_model: ""
