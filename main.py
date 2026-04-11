@@ -51,16 +51,19 @@ def _rrf_merge(
 class AgenticRAGSystem:
     """Production agentic RAG with LangGraph orchestration and Ollama."""
 
-    MIN_SIMILARITY = 0.35  # cosine similarity threshold for vector candidates
+    MIN_SIMILARITY = 0.35       # cosine similarity threshold for vector candidates
+    RAG_CONFIDENCE_THRESHOLD = 0.025  # min RRF score to skip web fallback (max ~0.033)
 
     def __init__(
         self,
         model: str = "llama3.2",
         max_tool_calls: int = 5,
         chroma_path: str = "./chroma_db",
+        rag_confidence_threshold: float = 0.025,
     ) -> None:
         self.model = model
         self.max_tool_calls = max_tool_calls
+        self.rag_confidence_threshold = rag_confidence_threshold
         self.embed_model = "nomic-embed-text"
         self.chroma = chromadb.PersistentClient(path=chroma_path)
         self.collection = self.chroma.get_or_create_collection("notion_kb")
@@ -294,14 +297,13 @@ class AgenticRAGSystem:
             ]
 
             # Escalate to web search if top RRF score is below confidence threshold
-            RAG_CONFIDENCE_THRESHOLD = 0.015
             if rag_results:
                 best_score = max(r["score"] for r in rag_results)
-                if best_score < RAG_CONFIDENCE_THRESHOLD:
+                if best_score < self.rag_confidence_threshold:
                     logger.info(
                         "rag_search: top RRF score %.6f below threshold %.3f — escalating to web search",
                         best_score,
-                        RAG_CONFIDENCE_THRESHOLD,
+                        self.rag_confidence_threshold,
                     )
                     return {
                         **state,
@@ -356,12 +358,13 @@ class AgenticRAGSystem:
             )
             web_results: list[dict[str, Any]] = [
                 {
-                    "source": r["href"],
-                    "title": r["title"],
-                    "content": r["body"],
+                    "source": r.get("href", ""),
+                    "title": r.get("title", ""),
+                    "content": r.get("body", ""),
                     "score": 1.0,
                 }
                 for r in (raw or [])
+                if r.get("href") and r.get("body")
             ]
             logger.info("web_search: returned %d results", len(web_results))
             return {

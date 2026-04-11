@@ -13,6 +13,7 @@ retriever:
   top_n: 5
   rrf_k: 60
   bm25_top_k: 10
+  web_search_fallback_score: 0.4
 
 ingestion:
   chunk_size: 800

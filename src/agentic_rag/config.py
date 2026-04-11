@@ -30,6 +30,7 @@ class RetrieverConfig:
     top_n: int = 5
     rrf_k: int = 60
     bm25_top_k: int = 10
+    web_search_fallback_score: float = 0.4
 
 
 @dataclass

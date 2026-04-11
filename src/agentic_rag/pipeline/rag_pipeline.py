@@ -158,6 +158,21 @@ class RAGPipeline:
                 for r in results
             ]
             logger.info("rag_search: hybrid returned %d results", len(rag_results))
+
+            best_score = max((r["score"] for r in rag_results), default=0.0)
+            if best_score < self._config.retriever.web_search_fallback_score:
+                logger.info(
+                    "rag_search: best score %.3f below threshold %.3f — escalating to web",
+                    best_score,
+                    self._config.retriever.web_search_fallback_score,
+                )
+                return {
+                    **state,
+                    "rag_results": rag_results,
+                    "needs_web_search": True,
+                    "tool_calls": state["tool_calls"] + 1,
+                }
+
             return {
                 **state,
                 "rag_results": rag_results,
