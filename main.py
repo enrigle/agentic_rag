@@ -13,6 +13,8 @@ from langgraph.graph import StateGraph, START, END
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.checkpoint.memory import MemorySaver
 
+from agentic_rag.observability.langfuse import get_client as _lf_client, observation as _lf_obs
+
 logger = logging.getLogger(__name__)
 
 BM25_PATH = "./bm25_index"
@@ -91,11 +93,31 @@ class AgenticRAGSystem:
 
     async def _invoke_ollama(self, prompt: str) -> str:
         """Call local Ollama daemon asynchronously."""
-        response = await ollama.AsyncClient().chat(
-            model=self.model,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        return response.message.content  # type: ignore[return-value]
+        with _lf_obs("ollama.chat", as_type="generation", input=prompt, model=self.model):
+            response = await ollama.AsyncClient().chat(
+                model=self.model,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            content: str = response.message.content  # type: ignore[assignment]
+            lf = _lf_client()
+            if lf and content:
+                lf.update_current_generation(
+                    output=content,
+                    usage_details={
+                        "input": getattr(response, "prompt_eval_count", None) or 0,
+                        "output": getattr(response, "eval_count", None) or 0,
+                    },
+                )
+        return content
+
+    async def _embed_ollama(self, text: str) -> list[float]:
+        """Embed text using local Ollama daemon asynchronously."""
+        with _lf_obs("ollama.embed", as_type="embedding", input=text, model=self.embed_model):
+            embed_resp = await ollama.AsyncClient().embed(
+                model=self.embed_model, input=text
+            )
+            vector: list[float] = embed_resp["embeddings"][0]
+        return vector
 
     def _build_graph(self) -> CompiledStateGraph:
         """Build the LangGraph agent graph."""
@@ -119,7 +141,10 @@ class AgenticRAGSystem:
         return graph.compile(checkpointer=MemorySaver())
 
     async def analyze_query(self, state: AgentState) -> AgentState:
-        """Analyze query to determine which tools are needed."""
+        with _lf_obs("analyze_query", as_type="agent", input={"query": state.get("query", "")}):
+            return await self._analyze_query(state)
+
+    async def _analyze_query(self, state: AgentState) -> AgentState:
         if state["tool_calls"] >= state["max_tool_calls"]:
             logger.warning("Circuit breaker triggered in analyze_query")
             return {
@@ -180,7 +205,10 @@ class AgenticRAGSystem:
             }
 
     async def rag_search(self, state: AgentState) -> AgentState:
-        """Hybrid search: vector (ChromaDB) + BM25, merged via RRF."""
+        with _lf_obs("rag_search", as_type="retriever", input={"query": state.get("query", "")}):
+            return await self._rag_search(state)
+
+    async def _rag_search(self, state: AgentState) -> AgentState:
         if state.get("error"):
             logger.warning(
                 "rag_search: skipping due to prior error: %s", state["error"]
@@ -198,10 +226,7 @@ class AgenticRAGSystem:
 
         try:
             # --- Vector search ---
-            embed_resp = await ollama.AsyncClient().embed(
-                model=self.embed_model, input=state["query"]
-            )
-            query_vec: list[float] = embed_resp["embeddings"][0]
+            query_vec = await self._embed_ollama(state["query"])
 
             loop = asyncio.get_running_loop()
             vector_raw: dict[str, Any] = await loop.run_in_executor(
@@ -334,7 +359,10 @@ class AgenticRAGSystem:
             }
 
     async def web_search(self, state: AgentState) -> AgentState:
-        """Search the web via DuckDuckGo."""
+        with _lf_obs("web_search", as_type="tool", input={"query": state.get("query", "")}):
+            return await self._web_search(state)
+
+    async def _web_search(self, state: AgentState) -> AgentState:
         if state.get("error"):
             logger.warning(
                 "web_search: skipping due to prior error: %s", state["error"]
@@ -392,7 +420,10 @@ class AgenticRAGSystem:
         return "synthesize"
 
     async def synthesize(self, state: AgentState) -> AgentState:
-        """Generate final answer using Ollama with retrieved context."""
+        with _lf_obs("synthesize", as_type="chain", input={"query": state.get("query", "")}):
+            return await self._synthesize(state)
+
+    async def _synthesize(self, state: AgentState) -> AgentState:
         rag_results: list[dict[str, Any]] = state.get("rag_results") or []
         web_results: list[dict[str, Any]] = state.get("web_results") or []
         all_results = rag_results + web_results
@@ -451,7 +482,12 @@ class AgenticRAGSystem:
             }
 
     async def query(
-        self, user_query: str, thread_id: str = "default"
+        self,
+        user_query: str,
+        thread_id: str = "default",
+        *,
+        trace_tags: list[str] | None = None,
+        trace_metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Execute the full agentic pipeline."""
         if not user_query:
@@ -471,45 +507,69 @@ class AgenticRAGSystem:
 
         config = {"configurable": {"thread_id": thread_id}}
         t0 = time.monotonic()
+        lf = _lf_client()
 
-        try:
-            final_state: AgentState = await self.graph.ainvoke(
-                initial_state, config=config
-            )
-        except Exception as exc:
-            logger.exception("query: graph invocation failed: %s", exc)
+        with _lf_obs(
+            "AgenticRAGSystem.query",
+            as_type="agent",
+            input={"query": user_query},
+            metadata=trace_metadata,
+        ):
+            try:
+                final_state: AgentState = await self.graph.ainvoke(
+                    initial_state, config=config
+                )
+            except Exception as exc:
+                logger.exception("query: graph invocation failed: %s", exc)
+                latency_ms = (time.monotonic() - t0) * 1000
+                result: dict[str, Any] = {
+                    "answer": f"Pipeline failed: {exc}",
+                    "sources": [],
+                    "tool_calls_used": 0,
+                    "latency_ms": round(latency_ms, 2),
+                }
+                if lf:
+                    trace_id = lf.get_current_trace_id()
+                    if trace_id:
+                        result["trace_id"] = trace_id
+                return result
+
             latency_ms = (time.monotonic() - t0) * 1000
-            return {
-                "answer": f"Pipeline failed: {exc}",
-                "sources": [],
-                "tool_calls_used": 0,
+
+            rag_results = final_state.get("rag_results") or []
+            web_results = final_state.get("web_results") or []
+            all_results = rag_results + web_results
+            sources = [
+                {
+                    "index": i + 1,
+                    "title": r["title"],
+                    "url": r["source"],
+                    "content": r.get("content", ""),
+                    "score": r.get("score", 0.0),
+                }
+                for i, r in enumerate(all_results)
+            ]
+            top_score = max((r.get("score", 0.0) for r in rag_results), default=0.0)
+            answer = final_state.get("final_answer") or ""
+
+            if lf:
+                lf.update_current_span(output={"answer": answer})
+
+            result: dict[str, Any] = {
+                "answer": answer,
+                "sources": sources,
+                "tool_calls_used": final_state["tool_calls"],
                 "latency_ms": round(latency_ms, 2),
+                "top_score": top_score,
             }
+            if lf:
+                trace_id = lf.get_current_trace_id()
+                if trace_id:
+                    result["trace_id"] = trace_id
 
-        latency_ms = (time.monotonic() - t0) * 1000
-
-        rag_results = final_state.get("rag_results") or []
-        web_results = final_state.get("web_results") or []
-        all_results = rag_results + web_results
-        sources = [
-            {
-                "index": i + 1,
-                "title": r["title"],
-                "url": r["source"],
-                "content": r.get("content", ""),
-                "score": r.get("score", 0.0),
-            }
-            for i, r in enumerate(all_results)
-        ]
-        top_score = max((r.get("score", 0.0) for r in rag_results), default=0.0)
-
-        return {
-            "answer": final_state.get("final_answer") or "",
-            "sources": sources,
-            "tool_calls_used": final_state["tool_calls"],
-            "latency_ms": round(latency_ms, 2),
-            "top_score": top_score,
-        }
+        if lf:
+            lf.flush()
+        return result
 
 
 if __name__ == "__main__":

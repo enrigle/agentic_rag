@@ -1,10 +1,23 @@
 # Agentic RAG
-##TODO: Add docker
+
+## Langfuse (optional tracing + evals)
+
+This repo has optional Langfuse tracing for LangGraph runs + Ollama calls. When enabled:
+
+- `main.AgenticRAGSystem.query()` returns a `trace_id`
+- `eval.py` logs your `[y/n]` rating back to Langfuse as a `human_rating` score
+
+```bash
+uv add langfuse
+export LANGFUSE_PUBLIC_KEY=...
+export LANGFUSE_SECRET_KEY=...
+export LANGFUSE_HOST=...   # optional (cloud or self-hosted)
+```
+
+##TODO: Add docker compose
 ##TODO: Add minikube
 ##TODO: Add some cloud options to expose the RAG app
-##TODO: Add Langfuse for evaluations. Possible to do in the front-end?
-##TODO: Is there a way to test the chunking length from the front-end?
-
+##TODO: clean the code, there are many except Exception as exc: logger.exception...create a class that handles this better
 
 Local agentic RAG system using LangGraph, Ollama (llama3.2), and a Notion knowledge base. No cloud credentials required.
 
@@ -38,6 +51,14 @@ uv run python ingest.py
 # 6. Run a query
 uv run python main.py
 ```
+
+## UI (Streamlit)
+
+```bash
+uv run streamlit run app.py
+```
+
+Use the sidebar → **Chunking** to paste text and preview chunk counts and character lengths for different `ingestion.chunk_size` / `ingestion.chunk_overlap` values.
 
 ### Notion setup (step 4)
 

@@ -20,6 +20,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from main import AgenticRAGSystem
+from agentic_rag.observability.langfuse import score_trace
 
 logger = logging.getLogger(__name__)
 
@@ -79,9 +80,14 @@ async def run_eval() -> None:
             print(f"Expected keywords: {', '.join(expected)}")
         print("Running query...")
 
-        result = await system.query(query)
+        result = await system.query(
+            query,
+            trace_tags=["eval"],
+            trace_metadata={"eval_query_id": qid},
+        )
         answer: str = result.get("answer", "")
         sources: list[dict[str, Any]] = result.get("sources", [])
+        trace_id: str = result.get("trace_id", "")
 
         print(f"\nAnswer:\n{answer}")
         if sources:
@@ -111,6 +117,14 @@ async def run_eval() -> None:
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
         _append_result(record)
+
+        if rating_input in ("y", "n") and trace_id:
+            score_trace(
+                trace_id=trace_id,
+                name="human_rating",
+                value=1 if rating_input == "y" else 0,
+                comment=note or None,
+            )
         print(f"Saved {'✓' if rating_input == 'y' else '✗'}\n")
 
     print("Done.")
