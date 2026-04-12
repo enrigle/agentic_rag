@@ -14,8 +14,10 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.checkpoint.memory import MemorySaver
 
 from agentic_rag.observability.langfuse import get_client as _lf_client, observation as _lf_obs
+from agentic_rag.utils.errors import ErrorHandler
 
 logger = logging.getLogger(__name__)
+_errors = ErrorHandler(logger)
 
 BM25_PATH = "./bm25_index"
 
@@ -197,12 +199,11 @@ class AgenticRAGSystem:
                 "tool_calls": state["tool_calls"] + 1,
             }
         except Exception as exc:
-            logger.exception("analyze_query: unexpected error: %s", exc)
-            return {
-                **state,
-                "error": str(exc),
-                "tool_calls": state["tool_calls"] + 1,
-            }
+            return _errors.state_from_exception(
+                state,
+                "analyze_query: unexpected error",
+                exc,
+            )
 
     async def rag_search(self, state: AgentState) -> AgentState:
         with _lf_obs("rag_search", as_type="retriever", input={"query": state.get("query", "")}):
@@ -350,13 +351,12 @@ class AgenticRAGSystem:
             }
 
         except Exception as exc:
-            logger.exception("rag_search: error: %s", exc)
-            return {
-                **state,
-                "error": str(exc),
-                "rag_results": [],
-                "tool_calls": state["tool_calls"] + 1,
-            }
+            return _errors.state_from_exception(
+                state,
+                "rag_search: error",
+                exc,
+                updates={"rag_results": []},
+            )
 
     async def web_search(self, state: AgentState) -> AgentState:
         with _lf_obs("web_search", as_type="tool", input={"query": state.get("query", "")}):
@@ -401,13 +401,12 @@ class AgenticRAGSystem:
                 "tool_calls": state["tool_calls"] + 1,
             }
         except Exception as exc:
-            logger.exception("web_search: error: %s", exc)
-            return {
-                **state,
-                "error": str(exc),
-                "web_results": [],
-                "tool_calls": state["tool_calls"] + 1,
-            }
+            return _errors.state_from_exception(
+                state,
+                "web_search: error",
+                exc,
+                updates={"web_results": []},
+            )
 
     def should_web_search(
         self, state: AgentState
@@ -474,12 +473,13 @@ class AgenticRAGSystem:
                 "tool_calls": state["tool_calls"] + 1,
             }
         except Exception as exc:
-            logger.exception("synthesize: generation failed: %s", exc)
-            return {
-                **state,
-                "final_answer": f"Generation failed: {exc}",
-                "tool_calls": state["tool_calls"] + 1,
-            }
+            return _errors.state_from_exception(
+                state,
+                "synthesize: generation failed",
+                exc,
+                updates={"final_answer": f"Generation failed: {exc}"},
+                set_error=False,
+            )
 
     async def query(
         self,
@@ -520,7 +520,7 @@ class AgenticRAGSystem:
                     initial_state, config=config
                 )
             except Exception as exc:
-                logger.exception("query: graph invocation failed: %s", exc)
+                _errors.log("query: graph invocation failed", exc, level="exception")
                 latency_ms = (time.monotonic() - t0) * 1000
                 result: dict[str, Any] = {
                     "answer": f"Pipeline failed: {exc}",

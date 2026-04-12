@@ -122,11 +122,35 @@ uv run python eval.py --report  # print pass-rate summary from saved results
 Results are saved to `evals/results.jsonl`.
 
 ## Architecture
+```mermaid
+flowchart TD
+  %% ───────────────────────── Online query path ─────────────────────────
+  subgraph Online["Online: answer a user query"]
+    UI["Client/UI\n`app.py` (Streamlit) or your code"] --> Q["Query\n`AgenticRAGSystem.query()` / `RAGPipeline.query()`"]
+    Q --> G["LangGraph `StateGraph`\n(analyze → rag_search → (web_search?) → synthesize)"]
+    G -->|hybrid retrieval| H["`HybridRetriever` (RRF merge)"]
+    H -->|vector| V["ChromaDB `chroma_db/`"]
+    H -->|keyword| K["BM25 `bm25_index/`"]
+    G -->|fallback or needs web| W["DuckDuckGo `DDGS().text()`"]
+    G --> A["Final answer + sources"]
+    A --> UI
+  end
 
-```
-query → analyze → rag_search → [needs web?] → synthesize → answer
-                                    ↓ yes
-                               web_search → synthesize
+  %% ───────────────────────── Offline/ops workflows ─────────────────────
+  subgraph Offline["Offline: ingest, eval, feedback loop"]
+    N["Notion workspace"] --> I["Ingest\n`scripts/ingest.py` → `NotionIngester`"]
+    I --> C["Chunk + embed (Ollama)"]
+    C --> V
+    C --> K
+
+    E["Eval\n`scripts/eval.py` → `agentic_rag.evaluation.Evaluator`"] --> QF["`evals/queries.json`"]
+    E --> RF["writes `evals/results.jsonl`"]
+
+    FB["Feedback (in `app.py`)"] --> S["`agentic_rag.feedback.store` (`feedback.db`)"]
+    S --> J["Judge failures\n`agentic_rag.feedback.judge`"]
+    S --> O["Optimize\n`agentic_rag.feedback.optimizer`"]
+    O --> CFG["updates `config/default.yaml`\n+ writes `feedback_config.json`"]
+  end
 ```
 
 The pipeline is a LangGraph `StateGraph` with a circuit breaker (`max_tool_calls`) and `MemorySaver` checkpointing for conversation memory.
@@ -135,11 +159,29 @@ The pipeline is a LangGraph `StateGraph` with a circuit breaker (`max_tool_calls
 src/agentic_rag/
 ├── config.py          # RAGConfig dataclasses + YAML loader
 ├── models.py
-├── ingestion/         # Notion fetching, chunking, OCR, embedding
+├── ingestion/         # Notion fetching, chunking, embedding (+ image captioning)
 ├── retrieval/         # ChromaDB, BM25, hybrid RRF
-├── pipeline/          # LangGraph agent (rag_pipeline.py)
-├── llm/               # Ollama LLM abstraction
-└── evaluation/        # Evaluator logic
+├── pipeline/          # LangGraph agent (RAGPipeline)
+├── llm/               # Ollama LLM abstraction (chat + embed)
+├── feedback/          # Store + judge + optimizer (feedback loop)
+├── observability/     # Langfuse tracing/scoring
+├── evaluation/        # Evaluator logic (reads/writes `evals/`)
+└── utils/             # shared helpers (errors, etc.)
+```
+
+```
+repo/
+├── app.py             # Streamlit UI (query + feedback + background ingest)
+├── scripts/
+│   ├── ingest.py      # CLI wrapper for NotionIngester
+│   └── eval.py        # CLI wrapper for Evaluator
+├── evals/
+│   ├── queries.json   # eval inputs
+│   └── results.jsonl  # eval outputs (generated)
+├── tests/
+│   ├── unit/
+│   └── integration/
+└── src/agentic_rag/    # library code (see above)
 ```
 
 ## Development

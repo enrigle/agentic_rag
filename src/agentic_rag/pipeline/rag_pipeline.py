@@ -22,8 +22,10 @@ from agentic_rag.retrieval.base import BaseKeywordRetriever, BaseVectorStore
 from agentic_rag.retrieval.bm25 import BM25Retriever
 from agentic_rag.retrieval.chroma import ChromaVectorStore
 from agentic_rag.retrieval.hybrid import HybridRetriever
+from agentic_rag.utils.errors import ErrorHandler
 
 logger = logging.getLogger(__name__)
+_errors = ErrorHandler(logger)
 
 
 class RAGPipeline:
@@ -108,12 +110,11 @@ class RAGPipeline:
                 "tool_calls": state["tool_calls"] + 1,
             }
         except Exception as exc:
-            logger.exception("analyze_query: unexpected error: %s", exc)
-            return {
-                **state,
-                "error": str(exc),
-                "tool_calls": state["tool_calls"] + 1,
-            }
+            return _errors.state_from_exception(
+                state,
+                "analyze_query: unexpected error",
+                exc,
+            )
 
     async def rag_search(self, state: AgentState) -> AgentState:
         """Hybrid search via HybridRetriever (vector + BM25, merged with RRF)."""
@@ -180,13 +181,12 @@ class RAGPipeline:
             }
 
         except Exception as exc:
-            logger.exception("rag_search: error: %s", exc)
-            return {
-                **state,
-                "error": str(exc),
-                "rag_results": [],
-                "tool_calls": state["tool_calls"] + 1,
-            }
+            return _errors.state_from_exception(
+                state,
+                "rag_search: error",
+                exc,
+                updates={"rag_results": []},
+            )
 
     async def web_search(self, state: AgentState) -> AgentState:
         """Search the web via DuckDuckGo."""
@@ -228,13 +228,12 @@ class RAGPipeline:
                 "tool_calls": state["tool_calls"] + 1,
             }
         except Exception as exc:
-            logger.exception("web_search: error: %s", exc)
-            return {
-                **state,
-                "error": str(exc),
-                "web_results": [],
-                "tool_calls": state["tool_calls"] + 1,
-            }
+            return _errors.state_from_exception(
+                state,
+                "web_search: error",
+                exc,
+                updates={"web_results": []},
+            )
 
     def should_web_search(
         self, state: AgentState
@@ -288,12 +287,13 @@ class RAGPipeline:
                 "tool_calls": state["tool_calls"] + 1,
             }
         except Exception as exc:
-            logger.exception("synthesize: generation failed: %s", exc)
-            return {
-                **state,
-                "final_answer": f"Generation failed: {exc}",
-                "tool_calls": state["tool_calls"] + 1,
-            }
+            return _errors.state_from_exception(
+                state,
+                "synthesize: generation failed",
+                exc,
+                updates={"final_answer": f"Generation failed: {exc}"},
+                set_error=False,
+            )
 
     async def query(self, user_query: str, thread_id: str = "default") -> QueryResult:
         """Execute the full agentic pipeline and return a QueryResult."""
@@ -320,7 +320,7 @@ class RAGPipeline:
                 initial_state, config=graph_config
             )
         except Exception as exc:
-            logger.exception("query: graph invocation failed: %s", exc)
+            _errors.log("query: graph invocation failed", exc, level="exception")
             latency_ms = (time.monotonic() - t0) * 1000
             return QueryResult(
                 answer=f"Pipeline failed: {exc}",
