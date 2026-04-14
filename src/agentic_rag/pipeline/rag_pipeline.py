@@ -5,10 +5,11 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
 from typing import Any, Literal
 
-from duckduckgo_search import DDGS
+from tavily import AsyncTavilyClient
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
@@ -189,7 +190,7 @@ class RAGPipeline:
             )
 
     async def web_search(self, state: AgentState) -> AgentState:
-        """Search the web via DuckDuckGo."""
+        """Search the web via Tavily."""
         if state.get("error"):
             logger.warning(
                 "web_search: skipping due to prior error: %s", state["error"]
@@ -205,21 +206,19 @@ class RAGPipeline:
             }
 
         try:
-            loop = asyncio.get_running_loop()
-            raw: list[dict[str, Any]] = await loop.run_in_executor(
-                None,
-                lambda: DDGS().text(state["query"], max_results=5),
-            )
+            client = AsyncTavilyClient(api_key=os.environ["TAVILY_API_KEY"])
+            response = await client.search(state["query"], max_results=5)
+            raw: list[dict[str, Any]] = response.get("results", [])
             web_results: list[dict[str, Any]] = [
                 {
-                    "id": r.get("href", ""),
-                    "source": r.get("href", ""),
+                    "id": r.get("url", ""),
+                    "source": r.get("url", ""),
                     "title": r.get("title", ""),
-                    "content": r.get("body", ""),
-                    "score": 1.0,
+                    "content": r.get("content", ""),
+                    "score": r.get("score", 1.0),
                 }
-                for r in (raw or [])
-                if r.get("href") and r.get("body")
+                for r in raw
+                if r.get("url") and r.get("content")
             ]
             logger.info("web_search: returned %d results", len(web_results))
             return {
@@ -274,8 +273,10 @@ class RAGPipeline:
         )
 
         prompt = (
-            "You are a helpful assistant. Answer using ONLY the provided context. "
-            "Cite sources inline using [N] notation. Do not fabricate information.\n\n"
+            "You are a helpful assistant. Using the sources below, answer the question "
+            "directly and concisely. Cite sources inline with [N] notation. "
+            "If the sources contain relevant information, use it without disclaimers. "
+            "Only say you lack information if the sources genuinely contain nothing relevant.\n\n"
             f"Context:\n{context_blocks}\n\nQuestion: {state['query']}"
         )
 
