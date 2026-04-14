@@ -14,10 +14,10 @@ export LANGFUSE_SECRET_KEY=...
 export LANGFUSE_HOST=...   # optional (cloud or self-hosted)
 ```
 
+#TODO: Add memory for follow up questions
 ##TODO: Add docker compose
 ##TODO: Add minikube
 ##TODO: Add some cloud options to expose the RAG app
-##TODO: clean the code, there are many except Exception as exc: logger.exception...create a class that handles this better
 
 Local agentic RAG system using LangGraph, Ollama (llama3.2), and a Notion knowledge base. No cloud credentials required.
 

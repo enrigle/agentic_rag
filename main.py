@@ -64,7 +64,7 @@ class AgenticRAGSystem:
         model: str = "llama3.2",
         max_tool_calls: int = 5,
         chroma_path: str = "./chroma_db",
-        rag_confidence_threshold: float = 0.025,
+        rag_confidence_threshold: float = 0.030,
     ) -> None:
         self.model = model
         self.max_tool_calls = max_tool_calls
@@ -160,13 +160,17 @@ class AgenticRAGSystem:
         prompt = (
             "You are a query classifier. Respond with ONLY valid JSON, no prose.\n"
             'Format: {"needs_web_search": <bool>, "reason": "<str>"}\n\n'
-            "Rule: Set needs_web_search=true for queries about current/live data "
-            "(time, weather, news, prices, scores, events). "
-            "Set needs_web_search=false for factual or how-to questions.\n\n"
+            "Rules:\n"
+            "  - needs_web_search=true: current/live data (weather, news, prices, scores, events), "
+            "OR factual questions about external entities (people, companies, products, places) "
+            "that you are not certain about.\n"
+            "  - needs_web_search=false: procedural/how-to questions, or questions clearly "
+            "answerable from an internal knowledge base without needing the web.\n\n"
             "Examples:\n"
             '  Q: "what time is it in tokyo?" → {"needs_web_search": true, "reason": "current time requires live data"}\n'
+            '  Q: "who founded anthropic?" → {"needs_web_search": true, "reason": "factual question about an external entity"}\n'
             '  Q: "what is the weather in madrid?" → {"needs_web_search": true, "reason": "weather requires live data"}\n'
-            '  Q: "how do I deploy a flask app?" → {"needs_web_search": false, "reason": "factual how-to question"}\n\n'
+            '  Q: "how do I deploy a flask app?" → {"needs_web_search": false, "reason": "procedural how-to question"}\n\n'
             f"Query: {state['query']}"
         )
 
