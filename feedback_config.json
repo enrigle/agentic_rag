@@ -1,0 +1,16 @@
+{
+  "few_shot_examples": [
+    {
+      "query": "what are hooks in claude?",
+      "answer": "According to sources [3], [4], [6], [7], [8], and [10], hooks in Claude Code are custom scripts that can be run automatically for specific events. They allow users to automate tasks without having to manually supervise the AI assistant.\n\nHooks provide a way to introduce control at specific points in the lifecycle of a project, making it possible for users to enforce rules or behavior automatically. Hooks can be used to automatize workflows and are an underutilized feature in Claude Code.\n\nThere are different types of hooks, including:\n\n* SessionStart hook: runs when a new session starts\n* Instincts-related hooks (e.g., instinct-import, instinct-export)\n* Skills-related hooks (e.g., evolve)\n\nHooks can be created using the `hooks` block in a settings file and can use various fields such as matcher, if, and tool to conditionally execute or filter the hook."
+    },
+    {
+      "query": "the weather in madrid today",
+      "answer": "According to [7] Weather in Madrid in April 2026, the current weather conditions are as follows:\n\n* Day: +63°\n* Time: Tuesday, 14 April\n* Conditions: Waning"
+    },
+    {
+      "query": "who is the founder of claude?",
+      "answer": "According to source [7], Dario Amodei and his sister Daniela Amodei founded Anthropic, the makers of Claude AI. Therefore, the founder of Claude is also Dario Amodei."
+    }
+  ]
+}
