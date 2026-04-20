@@ -1,6 +1,7 @@
 # app.py
 import asyncio
 import threading
+import uuid
 from typing import TypedDict
 
 import streamlit as st
@@ -53,8 +54,26 @@ if not st.session_state.get("sync_started"):
     threading.Thread(target=_run_ingest, daemon=True).start()
     st.session_state["sync_started"] = True
 
+# ── Session defaults ───────────────────────────────────────────────────────────
+if "thread_id" not in st.session_state:
+    st.session_state.thread_id = str(uuid.uuid4())
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+if "rated" not in st.session_state:
+    st.session_state.rated = False
+if "show_note" not in st.session_state:
+    st.session_state.show_note = False
+
 # ── Sidebar ────────────────────────────────────────────────────────────────────
 with st.sidebar:
+    st.header("Conversation")
+    if st.button("New conversation"):
+        st.session_state.thread_id = str(uuid.uuid4())
+        st.session_state.messages = []
+        st.session_state.rated = False
+        st.session_state.show_note = False
+        st.rerun()
+
     st.header("Knowledge Base")
     _status = _sync_state["status"]
     if _status == "syncing":
@@ -93,90 +112,107 @@ with st.sidebar:
 # ── Main ───────────────────────────────────────────────────────────────────────
 st.title("Agentic RAG")
 
-with st.form("search_form"):
-    query = st.text_input("Ask a question")
-    submitted = st.form_submit_button("Search")
+# Render conversation history
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
+        if msg["role"] == "assistant" and msg.get("result"):
+            r = msg["result"]
+            if r["sources"]:
+                with st.expander("Sources"):
+                    for s in r["sources"]:
+                        st.markdown(f"[{s['index']}. {s['title']}]({s['url']})")
+            st.caption(
+                f"Tool calls: {r['tool_calls_used']} · Latency: {r['latency_ms']:.0f}ms"
+            )
 
-if submitted and query:
+# Feedback for the last answer (shown below chat)
+last_result = (
+    st.session_state.messages[-1].get("result")
+    if st.session_state.messages
+    and st.session_state.messages[-1]["role"] == "assistant"
+    else None
+)
+last_query = (
+    st.session_state.messages[-2]["content"]
+    if len(st.session_state.messages) >= 2
+    else ""
+)
+
+if last_result and not st.session_state.rated:
+    st.divider()
+    col1, col2 = st.columns(2)
+
+    if col1.button("👍 Good answer"):
+        entry = FeedbackEntry(
+            query=last_query,
+            answer=last_result["answer"],
+            sources=[
+                {
+                    "title": s["title"],
+                    "content": s.get("content", ""),
+                    "score": s.get("score", 0.0),
+                }
+                for s in last_result["sources"]
+            ],
+            top_score=last_result.get("top_score", 0.0),
+            rating=1,
+        )
+        save(entry)
+        st.session_state.rated = True
+        st.rerun()
+
+    if col2.button("👎 Bad answer"):
+        st.session_state.show_note = True
+        st.rerun()
+
+    if st.session_state.show_note:
+        note = st.text_input("What was wrong? (optional)")
+        if st.button("Submit feedback"):
+            sources_for_store = [
+                {
+                    "title": s["title"],
+                    "content": s.get("content", ""),
+                    "score": s.get("score", 0.0),
+                }
+                for s in last_result["sources"]
+            ]
+            entry = FeedbackEntry(
+                query=last_query,
+                answer=last_result["answer"],
+                sources=sources_for_store,
+                top_score=last_result.get("top_score", 0.0),
+                rating=-1,
+                note=note,
+            )
+            entry_id = save(entry)
+            with st.spinner("Analyzing failure..."):
+                category = asyncio.run(
+                    classify_failure(
+                        query=last_query,
+                        answer=last_result["answer"],
+                        sources=sources_for_store,
+                    )
+                )
+            update_category(entry_id, category)
+            st.session_state.rated = True
+            st.session_state.show_note = False
+            st.rerun()
+elif last_result and st.session_state.rated:
+    st.caption("Thanks for the feedback!")
+
+# Chat input (always at bottom)
+query = st.chat_input("Ask a question")
+
+if query:
+    st.session_state.messages.append({"role": "user", "content": query, "result": None})
     with st.spinner("Thinking..."):
-        result = asyncio.run(get_system().query(query))
-    st.session_state.result = result
-    st.session_state.last_query = query
+        result = asyncio.run(
+            get_system().query(query, thread_id=st.session_state.thread_id)
+        )
+    st.session_state.messages.append(
+        {"role": "assistant", "content": result["answer"], "result": result}
+    )
     st.session_state.rated = False
     st.session_state.show_note = False
-
-if st.session_state.get("result"):
-    result = st.session_state.result
-    st.markdown(result["answer"])
-
-    if result["sources"]:
-        st.divider()
-        st.subheader("Sources")
-        for s in result["sources"]:
-            st.markdown(f"[{s['index']}. {s['title']}]({s['url']})")
-
-    st.caption(
-        f"Tool calls: {result['tool_calls_used']} · Latency: {result['latency_ms']:.0f}ms"
-    )
-
-    if not st.session_state.get("rated"):
-        st.divider()
-        col1, col2 = st.columns(2)
-
-        if col1.button("👍 Good answer"):
-            entry = FeedbackEntry(
-                query=st.session_state.last_query,
-                answer=result["answer"],
-                sources=[
-                    {
-                        "title": s["title"],
-                        "content": s.get("content", ""),
-                        "score": s.get("score", 0.0),
-                    }
-                    for s in result["sources"]
-                ],
-                top_score=result.get("top_score", 0.0),
-                rating=1,
-            )
-            save(entry)
-            st.session_state.rated = True
-            st.rerun()
-
-        if col2.button("👎 Bad answer"):
-            st.session_state.show_note = True
-            st.rerun()
-
-        if st.session_state.get("show_note"):
-            note = st.text_input("What was wrong? (optional)")
-            if st.button("Submit feedback"):
-                sources_for_store = [
-                    {
-                        "title": s["title"],
-                        "content": s.get("content", ""),
-                        "score": s.get("score", 0.0),
-                    }
-                    for s in result["sources"]
-                ]
-                entry = FeedbackEntry(
-                    query=st.session_state.last_query,
-                    answer=result["answer"],
-                    sources=sources_for_store,
-                    top_score=result.get("top_score", 0.0),
-                    rating=-1,
-                    note=note,
-                )
-                entry_id = save(entry)
-                with st.spinner("Analyzing failure..."):
-                    category = asyncio.run(
-                        classify_failure(
-                            query=st.session_state.last_query,
-                            answer=result["answer"],
-                            sources=sources_for_store,
-                        )
-                    )
-                update_category(entry_id, category)
-                st.session_state.rated = True
-                st.session_state.show_note = False
-                st.rerun()
-    else:
-        st.caption("Thanks for the feedback!")
+    st.rerun()

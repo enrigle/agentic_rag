@@ -58,6 +58,7 @@ class AgenticRAGSystem:
 
     MIN_SIMILARITY = 0.35       # cosine similarity threshold for vector candidates
     RAG_CONFIDENCE_THRESHOLD = 0.025  # min RRF score to skip web fallback (max ~0.033)
+    MEMORY_MAX_MESSAGES = 12  # rolling window (user+assistant messages)
 
     def __init__(
         self,
@@ -74,8 +75,30 @@ class AgenticRAGSystem:
         self.collection = self.chroma.get_or_create_collection("notion_kb")
         self.bm25_retriever: bm25s.BM25 | None = None
         self.bm25_ids: list[str] = []
+        self._chat_memory: dict[str, list[dict[str, str]]] = {}
         self._load_bm25()
         self.graph = self._build_graph()
+
+    def _trim_chat_history(
+        self, history: list[dict[str, str]]
+    ) -> list[dict[str, str]]:
+        if not history:
+            return []
+        return history[-self.MEMORY_MAX_MESSAGES :]
+
+    def _format_chat_history(
+        self, history: list[dict[str, str]], *, max_messages: int = 8
+    ) -> str:
+        if not history:
+            return ""
+        clipped = history[-max_messages:]
+        lines: list[str] = []
+        for m in clipped:
+            role = (m.get("role") or "").strip() or "user"
+            content = (m.get("content") or "").strip()
+            if content:
+                lines.append(f"{role}: {content}")
+        return "\n".join(lines)
 
     def _load_bm25(self) -> None:
         bm25_path = Path(BM25_PATH)
@@ -157,6 +180,8 @@ class AgenticRAGSystem:
                 "tool_calls": state["tool_calls"] + 1,
             }
 
+        convo = self._format_chat_history(state.get("chat_history") or [])
+        convo_block = f"\n\nConversation so far:\n{convo}\n" if convo else "\n"
         prompt = (
             "You are a query classifier. Respond with ONLY valid JSON, no prose.\n"
             'Format: {"needs_web_search": <bool>, "reason": "<str>"}\n\n'
@@ -171,7 +196,7 @@ class AgenticRAGSystem:
             '  Q: "who founded anthropic?" → {"needs_web_search": true, "reason": "factual question about an external entity"}\n'
             '  Q: "what is the weather in madrid?" → {"needs_web_search": true, "reason": "weather requires live data"}\n'
             '  Q: "how do I deploy a flask app?" → {"needs_web_search": false, "reason": "procedural how-to question"}\n\n'
-            f"Query: {state['query']}"
+            f"{convo_block}\nQuery: {state['query']}"
         )
 
         try:
@@ -461,13 +486,19 @@ class AgenticRAGSystem:
             except json.JSONDecodeError:
                 pass
 
+        convo = self._format_chat_history(state.get("chat_history") or [])
+        convo_block = (
+            f"\n\nConversation so far (use this for resolving references in follow-ups):\n{convo}\n"
+            if convo
+            else ""
+        )
         prompt = (
             "You are a helpful assistant. Using the sources below, answer the question "
             "directly and concisely. Cite sources inline with [N] notation. "
             "If the sources contain relevant information, use it without disclaimers. "
             "Only say you lack information if the sources genuinely contain nothing relevant."
             f"{few_shot_str}\n\n"
-            f"Context:\n{context_blocks}\n\nQuestion: {state['query']}"
+            f"{convo_block}\nContext:\n{context_blocks}\n\nQuestion: {state['query']}"
         )
 
         try:
@@ -498,9 +529,13 @@ class AgenticRAGSystem:
         if not user_query:
             raise ValueError("user_query cannot be empty")
 
+        prior_history = self._chat_memory.get(thread_id, [])
+        run_history = self._trim_chat_history(
+            prior_history + [{"role": "user", "content": user_query}]
+        )
         initial_state: AgentState = {
             "query": user_query,
-            "chat_history": [],
+            "chat_history": run_history,
             "tool_calls": 0,
             "max_tool_calls": self.max_tool_calls,
             "rag_results": None,
@@ -560,6 +595,9 @@ class AgenticRAGSystem:
             if lf:
                 lf.update_current_span(output={"answer": answer})
 
+            self._chat_memory[thread_id] = self._trim_chat_history(
+                run_history + [{"role": "assistant", "content": answer}]
+            )
             result: dict[str, Any] = {
                 "answer": answer,
                 "sources": sources,

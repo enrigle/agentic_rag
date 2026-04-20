@@ -82,6 +82,7 @@ async def run_eval() -> None:
 
         result = await system.query(
             query,
+            thread_id=qid or "eval",
             trace_tags=["eval"],
             trace_metadata={"eval_query_id": qid},
         )

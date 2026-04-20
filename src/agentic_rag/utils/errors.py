@@ -54,4 +54,3 @@ class ErrorHandler:
         if updates:
             next_state.update(dict(updates))
         return next_state
-
