@@ -14,10 +14,14 @@ export LANGFUSE_SECRET_KEY=...
 export LANGFUSE_HOST=...   # optional (cloud or self-hosted)
 ```
 
-#TODO: Add memory for follow up questions
-##TODO: Add docker compose
-##TODO: Add minikube
-##TODO: Add some cloud options to expose the RAG app
+## Conversation memory (follow-ups)
+
+To answer follow-up questions, the app keeps a rolling in-memory chat history per `thread_id` and uses it as extra context for retrieval + synthesis. Pass a stable `thread_id` when calling `AgenticRAGSystem.query()`. The Streamlit UI automatically generates a per-session `thread_id`.
+
+#TODO: Add github actions
+#TODO: Add docker compose
+#TODO: Add minikube
+#TODO: Add some cloud options to expose the RAG apps
 
 Local agentic RAG system using LangGraph, Ollama (llama3.2), and a Notion knowledge base. No cloud credentials required.
 
