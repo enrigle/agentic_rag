@@ -21,6 +21,7 @@ dependencies = [
     "pytesseract>=0.3.13",
     "python-dotenv>=1.0.0",
     "pyyaml>=6.0",
+    "sentence-transformers>=3.0",
     "streamlit>=1.35",
     "watchdog>=6.0.0",
 ]
