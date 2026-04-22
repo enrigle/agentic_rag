@@ -22,6 +22,7 @@ from agentic_rag.retrieval.base import BaseKeywordRetriever, BaseVectorStore
 from agentic_rag.retrieval.bm25 import BM25Retriever
 from agentic_rag.retrieval.chroma import ChromaVectorStore
 from agentic_rag.retrieval.hybrid import HybridRetriever
+from agentic_rag.retrieval.reranker import CrossEncoderReranker
 from agentic_rag.utils.errors import ErrorHandler
 
 logger = logging.getLogger(__name__)
@@ -43,6 +44,10 @@ class RAGPipeline:
         self._keyword_retriever = keyword_retriever
         self._config = config
         self._hybrid = HybridRetriever(vector_store, keyword_retriever, config)
+        self._reranker = CrossEncoderReranker(
+            model=config.retriever.reranker_model,
+            top_k=config.retriever.reranker_top_k,
+        )
         self._graph: CompiledStateGraph[Any, Any, Any] = self._build_graph()
 
     def _build_graph(self) -> CompiledStateGraph[Any, Any, Any]:
@@ -52,6 +57,7 @@ class RAGPipeline:
         graph.add_node("analyze", self.analyze_query)
         graph.add_node("rag_search", self.rag_search)
         graph.add_node("web_search", self.web_search)
+        graph.add_node("rerank", self.rerank)
         graph.add_node("synthesize", self.synthesize)
 
         graph.add_edge(START, "analyze")
@@ -59,9 +65,10 @@ class RAGPipeline:
         graph.add_conditional_edges(
             "rag_search",
             self.should_web_search,
-            path_map={"web_search": "web_search", "synthesize": "synthesize"},
+            path_map={"web_search": "web_search", "rerank": "rerank"},
         )
-        graph.add_edge("web_search", "synthesize")
+        graph.add_edge("web_search", "rerank")
+        graph.add_edge("rerank", "synthesize")
         graph.add_edge("synthesize", END)
 
         return graph.compile(checkpointer=MemorySaver())
@@ -235,19 +242,26 @@ class RAGPipeline:
 
     def should_web_search(
         self, state: AgentState
-    ) -> Literal["web_search", "synthesize"]:
+    ) -> Literal["web_search", "rerank"]:
         """Conditional edge: decide if web search is needed."""
         if state.get("error"):
-            return "synthesize"
+            return "rerank"
         if state["needs_web_search"] and state["tool_calls"] < state["max_tool_calls"]:
             return "web_search"
-        return "synthesize"
+        return "rerank"
+
+    async def rerank(self, state: AgentState) -> AgentState:
+        """Pool RAG + web results and rerank with cross-encoder, keeping top-k."""
+        if state.get("error"):
+            return {**state, "reranked_results": [], "tool_calls": state["tool_calls"] + 1}
+        candidates = (state.get("rag_results") or []) + (state.get("web_results") or [])
+        reranked = self._reranker.rerank(state["query"], candidates)
+        logger.info("rerank: %d candidates → %d results", len(candidates), len(reranked))
+        return {**state, "reranked_results": reranked, "tool_calls": state["tool_calls"] + 1}
 
     async def synthesize(self, state: AgentState) -> AgentState:
         """Generate final answer using LLM with retrieved context."""
-        rag_results: list[dict[str, Any]] = state.get("rag_results") or []
-        web_results: list[dict[str, Any]] = state.get("web_results") or []
-        all_results = rag_results + web_results
+        all_results: list[dict[str, Any]] = state.get("reranked_results") or []
 
         if state["tool_calls"] >= state["max_tool_calls"]:
             logger.warning(
@@ -307,6 +321,7 @@ class RAGPipeline:
             "max_tool_calls": self._config.max_tool_calls,
             "rag_results": None,
             "web_results": None,
+            "reranked_results": None,
             "needs_web_search": False,
             "final_answer": None,
             "error": None,
@@ -331,8 +346,7 @@ class RAGPipeline:
 
         latency_ms = (time.monotonic() - t0) * 1000
 
-        rag_results = final_state.get("rag_results") or []
-        web_results = final_state.get("web_results") or []
+        reranked = final_state.get("reranked_results") or []
         sources: list[SearchResult] = [
             SearchResult(
                 id=r.get("id", ""),
@@ -341,7 +355,7 @@ class RAGPipeline:
                 content=r.get("content", ""),
                 score=r.get("score", 0.0),
             )
-            for r in rag_results + web_results
+            for r in reranked
         ]
 
         return QueryResult(

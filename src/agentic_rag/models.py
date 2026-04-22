@@ -32,6 +32,7 @@ class AgentState(TypedDict):
     max_tool_calls: int
     rag_results: list[dict[str, Any]] | None
     web_results: list[dict[str, Any]] | None
+    reranked_results: list[dict[str, Any]] | None
     needs_web_search: bool
     final_answer: str | None
     error: str | None

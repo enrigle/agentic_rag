@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-04-22
+
+### Added
+- Cross-encoder reranking node (`rerank`) using `cross-encoder/ms-marco-MiniLM-L-2-v2`
+- `CrossEncoderReranker` class in `src/agentic_rag/retrieval/reranker.py`
+- `reranked_results` field in `AgentState`
+- Unit tests for `CrossEncoderReranker` (empty input, top-k, score ordering, fewer candidates than top-k)
+
+### Changed
+- RAG candidate pool widened from `top_n=5` to `top_n=20` to give the reranker more signal
+- Both retrieval paths (RAG-only and RAG+web) now converge at `rerank` before `synthesize`
+- `synthesize` and `query()` sources now reflect reranked results only
+
 ## [0.4.0] - 2026-04-20
 
 ### Added

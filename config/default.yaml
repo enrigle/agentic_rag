@@ -10,10 +10,12 @@ llm:
 
 retriever:
   min_similarity: 0.35
-  top_n: 5
+  top_n: 20
   rrf_k: 60
   bm25_top_k: 10
   web_search_fallback_score: 0.4
+  reranker_model: cross-encoder/ms-marco-MiniLM-L-2-v2
+  reranker_top_k: 5
 
 ingestion:
   chunk_size: 800

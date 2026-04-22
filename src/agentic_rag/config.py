@@ -27,10 +27,12 @@ class LLMConfig:
 @dataclass
 class RetrieverConfig:
     min_similarity: float = 0.35
-    top_n: int = 5
+    top_n: int = 20
     rrf_k: int = 60
     bm25_top_k: int = 10
     web_search_fallback_score: float = 0.4
+    reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-2-v2"
+    reranker_top_k: int = 5
 
 
 @dataclass
