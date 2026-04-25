@@ -26,4 +26,3 @@ def test_split_long_text_overlap_larger_than_size_terminates() -> None:
     assert all(len(c) <= 10 for c in chunks)
     assert chunks[0] == "a" * 10
     assert chunks[-1] == "a" * 5
-

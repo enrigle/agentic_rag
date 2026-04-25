@@ -70,4 +70,3 @@ async def test_hybrid_search_skips_ids_missing_from_fetch() -> None:
     retriever = HybridRetriever(vector_store, keyword, cfg)
     results = await retriever.search([0.0], "query")
     assert results == []
-

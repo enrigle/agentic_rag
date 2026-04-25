@@ -26,7 +26,7 @@ def sample_config() -> RAGConfig:
 @pytest.fixture
 def mock_llm() -> BaseLLM:
     llm = MagicMock(spec=BaseLLM)
-    llm.chat = AsyncMock(return_value='{"needs_web_search": false, "reason": "test"}')
+    llm.chat = AsyncMock(return_value="Here is the answer.")
     llm.embed = AsyncMock(return_value=[0.1, 0.2, 0.3])
     return llm
 
