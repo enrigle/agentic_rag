@@ -48,6 +48,11 @@ def get_system() -> AgenticRAGSystem:
     return AgenticRAGSystem()
 
 
+@st.cache_resource
+def _conversation_store() -> dict:
+    return {}
+
+
 # ── Background ingest (once per session) ───────────────────────────────────────
 if not st.session_state.get("sync_started"):
     _sync_state["status"] = "syncing"
@@ -55,10 +60,15 @@ if not st.session_state.get("sync_started"):
     st.session_state["sync_started"] = True
 
 # ── Session defaults ───────────────────────────────────────────────────────────
+# thread_id is stored in the URL so it survives WebSocket reconnections
+_store = _conversation_store()
 if "thread_id" not in st.session_state:
-    st.session_state.thread_id = str(uuid.uuid4())
+    _tid = st.query_params.get("thread_id") or str(uuid.uuid4())
+    st.session_state.thread_id = _tid
+    st.query_params["thread_id"] = _tid
 if "messages" not in st.session_state:
-    st.session_state.messages = []
+    # Restore from process-level store on reconnect; otherwise start fresh
+    st.session_state.messages = list(_store.get(st.session_state.thread_id, []))
 if "rated" not in st.session_state:
     st.session_state.rated = False
 if "show_note" not in st.session_state:
@@ -68,8 +78,11 @@ if "show_note" not in st.session_state:
 with st.sidebar:
     st.header("Conversation")
     if st.button("New conversation"):
-        st.session_state.thread_id = str(uuid.uuid4())
+        new_tid = str(uuid.uuid4())
+        st.session_state.thread_id = new_tid
         st.session_state.messages = []
+        _store[new_tid] = []
+        st.query_params["thread_id"] = new_tid
         st.session_state.rated = False
         st.session_state.show_note = False
         st.rerun()
@@ -121,7 +134,11 @@ for msg in st.session_state.messages:
             if r["sources"]:
                 with st.expander("Sources"):
                     for s in r["sources"]:
-                        st.markdown(f"[{s['index']}. {s['title']}]({s['url']})")
+                        st.markdown(
+                            f'<a href="{s["url"]}" target="_blank" rel="noopener noreferrer">'
+                            f'{s["index"]}. {s["title"]}</a>',
+                            unsafe_allow_html=True,
+                        )
             st.caption(
                 f"Tool calls: {r['tool_calls_used']} · Latency: {r['latency_ms']:.0f}ms"
             )
@@ -213,6 +230,7 @@ if query:
     st.session_state.messages.append(
         {"role": "assistant", "content": result["answer"], "result": result}
     )
+    _store[st.session_state.thread_id] = st.session_state.messages
     st.session_state.rated = False
     st.session_state.show_note = False
     st.rerun()
