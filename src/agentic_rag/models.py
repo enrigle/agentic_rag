@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, TypedDict
+from typing import Any
 
 
 @dataclass
@@ -23,16 +23,12 @@ class QueryResult:
     latency_ms: float
 
 
-class AgentState(TypedDict):
-    """LangGraph state dict — must remain TypedDict."""
-
+@dataclass
+class PipelineContext:
     query: str
     chat_history: list[dict[str, Any]]
-    tool_calls: int
-    max_tool_calls: int
-    rag_results: list[dict[str, Any]] | None
-    web_results: list[dict[str, Any]] | None
-    reranked_results: list[dict[str, Any]] | None
-    needs_web_search: bool
+    results: list[dict[str, Any]]  # single accumulator; all sources append here
     final_answer: str | None
     error: str | None
+    tool_calls: int
+    max_tool_calls: int

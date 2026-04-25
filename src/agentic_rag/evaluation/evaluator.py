@@ -11,7 +11,8 @@ from pathlib import Path
 from typing import Any
 
 from agentic_rag.config import RAGConfig
-from agentic_rag.pipeline.rag_pipeline import RAGPipeline, create_pipeline
+from agentic_rag.pipeline.coordinator import PipelineCoordinator
+from agentic_rag.pipeline.rag_pipeline import create_pipeline
 
 logger = logging.getLogger(__name__)
 
@@ -57,9 +58,9 @@ class Evaluator:
 
     def __init__(self, config: RAGConfig | None = None) -> None:
         self._config = config
-        self._pipeline: RAGPipeline | None = None
+        self._pipeline: PipelineCoordinator | None = None
 
-    def _get_pipeline(self) -> RAGPipeline:
+    def _get_pipeline(self) -> PipelineCoordinator:
         if self._pipeline is None:
             self._pipeline = create_pipeline(self._config)
         return self._pipeline
