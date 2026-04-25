@@ -6,6 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-04-25
+
+### Added
+- `PipelineCoordinator` — plain async coordinator replacing LangGraph `StateGraph`
+- `BaseSource` protocol with `RAGSource` and `WebSource` implementations (`pipeline/sources.py`)
+- `Synthesizer` class with chat history injection (`pipeline/synthesizer.py`)
+- `ConversationMemory` replacing LangGraph `MemorySaver` (`pipeline/memory.py`)
+- `PipelineContext` dataclass — single `results` accumulator, no per-source fields
+
+### Changed
+- Routing is now score-based: `RAGSource` runs first; `WebSource` (Tavily) is called only when best score falls below `web_search_fallback_score` threshold
+- `rag_pipeline.py` reduced to a thin `create_pipeline()` factory
+- `AgentState` TypedDict (10 fields) replaced by `PipelineContext` dataclass (7 fields)
+- Adding a new retrieval source now requires only a new `BaseSource` class — no state fields, no graph edges
+
+### Removed
+- LangGraph dependency (`StateGraph`, `MemorySaver`, conditional edges)
+- `analyze_query` LLM classifier node — eliminated unreliable LLM-based routing
+- `needs_web_search` flag and per-source result fields (`rag_results`, `web_results`, `reranked_results`)
+- `RAGPipeline` class
+
 ## [0.5.0] - 2026-04-22
 
 ### Added
