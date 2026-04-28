@@ -6,7 +6,7 @@ import dataclasses
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any, Optional, TypeVar
 
 import yaml  # type: ignore[import-untyped]
 
@@ -45,7 +45,7 @@ class IngestionConfig:
 @dataclass
 class AzureOpenAIConfig:
     endpoint: str = ""
-    api_key: str = ""
+    api_key: Optional[str] = None
     deployment: str = "gpt-4o-mini"
     api_version: str = "2024-02-01"
 
