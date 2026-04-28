@@ -21,3 +21,13 @@ ingestion:
   chunk_size: 800
   chunk_overlap: 100
   vision_model: ""
+
+azure_openai:
+  endpoint: ""
+  deployment: "gpt-4o-mini"
+  api_version: "2024-02-01"
+
+redis:
+  url: "redis://localhost:6379"
+  ttl_seconds: 3600
+  similarity_threshold: 0.95
