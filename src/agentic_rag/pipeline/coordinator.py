@@ -10,6 +10,7 @@ from agentic_rag.observability.langfuse import observation as _lf_obs
 from agentic_rag.pipeline.memory import ConversationMemory
 from agentic_rag.pipeline.sources import BaseSource
 from agentic_rag.pipeline.synthesizer import Synthesizer
+from agentic_rag.cache.semantic_cache import SemanticCache
 from agentic_rag.retrieval.reranker import CrossEncoderReranker
 
 logger = logging.getLogger(__name__)
@@ -24,6 +25,7 @@ class PipelineCoordinator:
         memory: ConversationMemory,
         threshold: float,
         max_tool_calls: int,
+        cache: SemanticCache | None = None,
     ) -> None:
         self._sources = sources
         self._reranker = reranker
@@ -31,10 +33,18 @@ class PipelineCoordinator:
         self._memory = memory
         self._threshold = threshold
         self._max_tool_calls = max_tool_calls
+        self._cache = cache
 
     async def query(self, user_query: str, thread_id: str = "default") -> QueryResult:
         if not user_query:
             raise ValueError("user_query cannot be empty")
+
+        # Cache check — return immediately on hit
+        if self._cache is not None:
+            cached = await self._cache.get(user_query)
+            if cached is not None:
+                logger.debug("cache hit for query len=%d", len(user_query))
+                return cached
 
         t0 = time.monotonic()
         ctx = PipelineContext(
@@ -88,9 +98,14 @@ class PipelineCoordinator:
             )
             for r in ctx.results
         ]
-        return QueryResult(
+        result = QueryResult(
             answer=ctx.final_answer or "",
             sources=sources,
             tool_calls_used=ctx.tool_calls,
             latency_ms=latency_ms,
         )
+
+        if self._cache is not None:
+            await self._cache.set(user_query, result)
+
+        return result
