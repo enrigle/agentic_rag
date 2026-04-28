@@ -62,6 +62,10 @@ class AzureOpenAILLM(BaseLLM):
         except openai.APIError as exc:
             raise RuntimeError(f"Azure OpenAI chat failed: {exc}") from exc
 
+        if not response.choices:
+            raise ValueError(
+                f"Azure OpenAI returned no choices for deployment={self._config.deployment!r}"
+            )
         content = response.choices[0].message.content
         if not content:
             raise ValueError(
