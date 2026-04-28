@@ -43,6 +43,21 @@ class IngestionConfig:
 
 
 @dataclass
+class AzureOpenAIConfig:
+    endpoint: str = ""
+    api_key: str = ""
+    deployment: str = "gpt-4o-mini"
+    api_version: str = "2024-02-01"
+
+
+@dataclass
+class RedisConfig:
+    url: str = "redis://localhost:6379"
+    ttl_seconds: int = 3600
+    similarity_threshold: float = 0.95
+
+
+@dataclass
 class RAGConfig:
     chroma_path: str = "./chroma_db"
     bm25_path: str = "./bm25_index"
@@ -51,6 +66,8 @@ class RAGConfig:
     llm: LLMConfig = field(default_factory=LLMConfig)
     retriever: RetrieverConfig = field(default_factory=RetrieverConfig)
     ingestion: IngestionConfig = field(default_factory=IngestionConfig)
+    azure_openai: AzureOpenAIConfig = field(default_factory=AzureOpenAIConfig)
+    redis: RedisConfig = field(default_factory=RedisConfig)
 
 
 _DC = TypeVar("_DC")
@@ -89,6 +106,8 @@ def load_config(path: Path | None = None) -> RAGConfig:
     llm_cfg = _parse_sub(LLMConfig, raw.get("llm") or {})
     retriever_cfg = _parse_sub(RetrieverConfig, raw.get("retriever") or {})
     ingestion_cfg = _parse_sub(IngestionConfig, raw.get("ingestion") or {})
+    azure_openai_cfg = _parse_sub(AzureOpenAIConfig, raw.get("azure_openai") or {})
+    redis_cfg = _parse_sub(RedisConfig, raw.get("redis") or {})
 
     top_level_keys = {"chroma_path", "bm25_path", "collection_name", "max_tool_calls"}
     top_level = {k: v for k, v in raw.items() if k in top_level_keys}
@@ -99,6 +118,8 @@ def load_config(path: Path | None = None) -> RAGConfig:
             llm=llm_cfg,
             retriever=retriever_cfg,
             ingestion=ingestion_cfg,
+            azure_openai=azure_openai_cfg,
+            redis=redis_cfg,
         )
     except TypeError as exc:
         logger.warning(
@@ -108,4 +129,6 @@ def load_config(path: Path | None = None) -> RAGConfig:
             llm=llm_cfg,
             retriever=retriever_cfg,
             ingestion=ingestion_cfg,
+            azure_openai=azure_openai_cfg,
+            redis=redis_cfg,
         )
