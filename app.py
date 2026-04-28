@@ -136,7 +136,7 @@ for msg in st.session_state.messages:
                     for s in r["sources"]:
                         st.markdown(
                             f'<a href="{s["url"]}" target="_blank" rel="noopener noreferrer">'
-                            f'{s["index"]}. {s["title"]}</a>',
+                            f"{s['index']}. {s['title']}</a>",
                             unsafe_allow_html=True,
                         )
             st.caption(
