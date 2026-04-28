@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Generator
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import openai
@@ -18,10 +19,13 @@ _VALID_CONFIG = AzureOpenAIConfig(
 )
 
 
-def _make_llm(config: AzureOpenAIConfig = _VALID_CONFIG) -> AzureOpenAILLM:
-    """Construct AzureOpenAILLM with a patched client constructor."""
-    with patch("agentic_rag.llm.azure_openai.openai.AsyncAzureOpenAI"):
-        return AzureOpenAILLM(config)
+@pytest.fixture
+def llm() -> Generator[AzureOpenAILLM, None, None]:
+    """Construct AzureOpenAILLM with a patched client constructor held open."""
+    with patch("agentic_rag.llm.azure_openai.openai.AsyncAzureOpenAI") as mock_cls:
+        instance = AzureOpenAILLM(_VALID_CONFIG)
+        instance._client = mock_cls.return_value
+        yield instance
 
 
 def _make_completion(content: str) -> MagicMock:
@@ -57,20 +61,22 @@ def test_init_raises_if_no_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_init_accepts_api_key_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AZURE_OPENAI_API_KEY", "env-key")
     config = AzureOpenAIConfig(
-        endpoint="https://my-resource.openai.azure.com",
+        endpoint="https://x.openai.azure.com",
         api_key=None,
     )
-    with patch("agentic_rag.llm.azure_openai.openai.AsyncAzureOpenAI"):
-        llm = AzureOpenAILLM(config)
-    assert llm is not None
+    with patch("agentic_rag.llm.azure_openai.openai.AsyncAzureOpenAI") as mock_cls:
+        AzureOpenAILLM(config)
+    mock_cls.assert_called_once_with(
+        azure_endpoint=config.endpoint,
+        api_key="env-key",
+        api_version=config.api_version,
+    )
 
 
 # ── chat ──────────────────────────────────────────────────────────────────────
 
 
-async def test_chat_returns_content() -> None:
-    llm = _make_llm()
-    llm._client = MagicMock()  # type: ignore[assignment]
+async def test_chat_returns_content(llm: AzureOpenAILLM) -> None:
     llm._client.chat.completions.create = AsyncMock(
         return_value=_make_completion("hello")
     )
@@ -80,9 +86,7 @@ async def test_chat_returns_content() -> None:
     assert result == "hello"
 
 
-async def test_chat_raises_runtime_error_on_api_failure() -> None:
-    llm = _make_llm()
-    llm._client = MagicMock()  # type: ignore[assignment]
+async def test_chat_raises_runtime_error_on_api_failure(llm: AzureOpenAILLM) -> None:
     llm._client.chat.completions.create = AsyncMock(
         side_effect=openai.APIError("fail", request=MagicMock(), body=None)
     )
@@ -91,27 +95,27 @@ async def test_chat_raises_runtime_error_on_api_failure() -> None:
         await llm.chat("test prompt")
 
 
-async def test_chat_raises_value_error_on_empty_content() -> None:
-    llm = _make_llm()
-    llm._client = MagicMock()  # type: ignore[assignment]
+async def test_chat_raises_value_error_on_empty_content(llm: AzureOpenAILLM) -> None:
     llm._client.chat.completions.create = AsyncMock(return_value=_make_completion(""))
 
     with pytest.raises(ValueError, match="empty content"):
         await llm.chat("test prompt")
 
 
-async def test_chat_raises_value_error_on_empty_prompt() -> None:
-    llm = _make_llm()
-
+async def test_chat_raises_value_error_on_empty_prompt(llm: AzureOpenAILLM) -> None:
     with pytest.raises(ValueError, match="non-empty"):
         await llm.chat("")
+
+
+async def test_chat_raises_on_empty_choices(llm: AzureOpenAILLM) -> None:
+    llm._client.chat.completions.create = AsyncMock(return_value=MagicMock(choices=[]))
+    with pytest.raises(ValueError, match="no choices"):
+        await llm.chat("test")
 
 
 # ── embed ─────────────────────────────────────────────────────────────────────
 
 
-async def test_embed_raises_not_implemented() -> None:
-    llm = _make_llm()
-
-    with pytest.raises(NotImplementedError, match="OllamaLLM"):
+async def test_embed_raises_not_implemented(llm: AzureOpenAILLM) -> None:
+    with pytest.raises(NotImplementedError, match="embeddings stay local"):
         await llm.embed("some text")
