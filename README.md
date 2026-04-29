@@ -23,7 +23,7 @@ To answer follow-up questions, the app keeps a rolling in-memory chat history pe
 #TODO: Add minikube
 #TODO: Add some cloud options to expose the RAG apps
 
-Local agentic RAG system using LangGraph, Ollama (llama3.2), and a Notion knowledge base. No cloud credentials required.
+Local agentic RAG system using Ollama (llama3.2) and a Notion knowledge base. Optionally uses Azure OpenAI for fast synthesis and Redis for semantic caching.
 
 ## Prerequisites
 
@@ -31,6 +31,8 @@ Local agentic RAG system using LangGraph, Ollama (llama3.2), and a Notion knowle
 - **[uv](https://docs.astral.sh/uv/getting-started/installation/)**
 - **[Ollama](https://ollama.com)**
 - **[Tesseract](https://github.com/tesseract-ocr/tesseract)** — for OCR on image blocks (`brew install tesseract` on macOS)
+- **Azure OpenAI** *(optional)* — replaces local Ollama synthesis; reduces query latency from 20–40 s to 2–4 s
+- **Redis** *(optional)* — semantic cache; cache hits return in < 5 ms
 
 ## Quickstart
 
@@ -113,6 +115,35 @@ ingestion:
   chunk_size: 800
   chunk_overlap: 100
   vision_model: llava    # Ollama model used for image captioning
+
+# Optional: Azure OpenAI for fast synthesis (replaces local Ollama chat)
+azure_openai:
+  endpoint: ""           # set via AZURE_OPENAI_ENDPOINT env var
+  deployment: "gpt-4o-mini"
+  api_version: "2024-02-01"
+  # api_key: set via AZURE_OPENAI_API_KEY env var (never in config file)
+
+# Optional: Redis semantic cache
+redis:
+  url: "redis://localhost:6379"
+  ttl_seconds: 3600
+  similarity_threshold: 0.95  # cosine similarity required for a cache hit
+```
+
+### Azure OpenAI setup
+
+```bash
+# 1. Create a free Azure account at azure.microsoft.com/free ($200 credit)
+# 2. Create an "Azure OpenAI" resource and deploy gpt-4o-mini
+# 3. Export credentials:
+export AZURE_OPENAI_ENDPOINT="https://<your-resource>.openai.azure.com/"
+export AZURE_OPENAI_API_KEY="<your-key>"
+```
+
+### Redis setup (local dev)
+
+```bash
+docker run -d -p 6379:6379 redis:latest
 ```
 
 ## Eval
@@ -126,18 +157,24 @@ uv run python eval.py --report  # print pass-rate summary from saved results
 Results are saved to `evals/results.jsonl`.
 
 ## Architecture
+
 ```mermaid
 flowchart TD
   %% ───────────────────────── Online query path ─────────────────────────
   subgraph Online["Online: answer a user query"]
-    UI["Client/UI\n`app.py` (Streamlit) or your code"] --> Q["Query\n`AgenticRAGSystem.query()` / `RAGPipeline.query()`"]
-    Q --> G["LangGraph `StateGraph`\n(analyze → rag_search → (web_search?) → synthesize)"]
-    G -->|hybrid retrieval| H["`HybridRetriever` (RRF merge)"]
+    UI["Client/UI\n`app.py` (Streamlit) or your code"] --> Q["`PipelineCoordinator.query()`"]
+    Q -->|cache hit| RC["Redis SemanticCache\n(< 5 ms)"]
+    RC --> A
+    Q -->|cache miss| H["`HybridRetriever` (RRF merge)"]
     H -->|vector| V["ChromaDB `chroma_db/`"]
     H -->|keyword| K["BM25 `bm25_index/`"]
-    G -->|fallback or needs web| W["DuckDuckGo `DDGS().text()`"]
-    G --> A["Final answer + sources"]
+    H --> R["`CrossEncoderReranker`"]
+    R --> S["`Synthesizer`\nOllamaLLM or AzureOpenAILLM"]
+    S -->|store result| RC
+    S --> A["Final answer + sources"]
     A --> UI
+    Q -->|score below threshold| W["Tavily web search"]
+    W --> R
   end
 
   %% ───────────────────────── Offline/ops workflows ─────────────────────
@@ -150,23 +187,24 @@ flowchart TD
     E["Eval\n`scripts/eval.py` → `agentic_rag.evaluation.Evaluator`"] --> QF["`evals/queries.json`"]
     E --> RF["writes `evals/results.jsonl`"]
 
-    FB["Feedback (in `app.py`)"] --> S["`agentic_rag.feedback.store` (`feedback.db`)"]
-    S --> J["Judge failures\n`agentic_rag.feedback.judge`"]
-    S --> O["Optimize\n`agentic_rag.feedback.optimizer`"]
+    FB["Feedback (in `app.py`)"] --> ST["`agentic_rag.feedback.store` (`feedback.db`)"]
+    ST --> J["Judge failures\n`agentic_rag.feedback.judge`"]
+    ST --> O["Optimize\n`agentic_rag.feedback.optimizer`"]
     O --> CFG["updates `config/default.yaml`\n+ writes `feedback_config.json`"]
   end
 ```
 
-The pipeline is a LangGraph `StateGraph` with a circuit breaker (`max_tool_calls`) and `MemorySaver` checkpointing for conversation memory.
+`PipelineCoordinator` runs sources in priority order with a score-based circuit breaker (`max_tool_calls`). Conversation memory is per `thread_id`.
 
 ```
 src/agentic_rag/
 ├── config.py          # RAGConfig dataclasses + YAML loader
 ├── models.py
+├── cache/             # SemanticCache (Redis, cosine similarity)
 ├── ingestion/         # Notion fetching, chunking, embedding (+ image captioning)
-├── retrieval/         # ChromaDB, BM25, hybrid RRF
-├── pipeline/          # LangGraph agent (RAGPipeline)
-├── llm/               # Ollama LLM abstraction (chat + embed)
+├── retrieval/         # ChromaDB, BM25, hybrid RRF, cross-encoder reranker
+├── pipeline/          # PipelineCoordinator, sources, synthesizer, memory
+├── llm/               # BaseLLM, OllamaLLM, AzureOpenAILLM
 ├── feedback/          # Store + judge + optimizer (feedback loop)
 ├── observability/     # Langfuse tracing/scoring
 ├── evaluation/        # Evaluator logic (reads/writes `evals/`)
