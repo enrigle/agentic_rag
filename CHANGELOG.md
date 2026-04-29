@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-04-29
+
+### Added
+- `AzureOpenAILLM` — new `BaseLLM` implementation backed by Azure OpenAI (`llm/azure_openai.py`); used for synthesis while embeddings remain local via `OllamaLLM`
+- `SemanticCache` — Redis-backed cache keyed by embedding vector; `get()` uses cosine similarity (SCAN + best-match) so near-identical queries skip the full pipeline (`cache/semantic_cache.py`)
+- `AzureOpenAIConfig` and `RedisConfig` dataclasses in `config.py`; corresponding sections in `config/default.yaml`
+- `PipelineCoordinator` now accepts an optional `cache: SemanticCache | None` — cache hit returns in < 5 ms; cache miss stores the result after synthesis
+
+### Changed
+- `pyproject.toml` adds `openai>=1.0`, `redis[asyncio]>=5.0`, `numpy>=1.26` as explicit dependencies
+
+### Performance
+- Expected latency without cache: 2–4 s (down from 20–40 s on CPU) when Azure OpenAI synthesis is configured
+- Expected latency on cache hit: < 5 ms for any previously seen or semantically similar query
+
 ## [0.6.0] - 2026-04-25
 
 ### Added
