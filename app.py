@@ -2,8 +2,8 @@
 import logging
 import asyncio
 
-# Suppress excessive logging from Streamlit's file watcher
 logging.getLogger("streamlit.watcher.local_sources_watcher").setLevel(logging.ERROR)
+logging.getLogger("transformers").setLevel(logging.ERROR)
 import threading
 import uuid
 from typing import TypedDict
