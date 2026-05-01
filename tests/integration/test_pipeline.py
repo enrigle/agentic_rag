@@ -44,7 +44,6 @@ def _make_coordinator(
         reranker=reranker,
         synthesizer=Synthesizer(mock_llm),
         memory=ConversationMemory(),
-        threshold=config.retriever.web_search_fallback_score,
         max_tool_calls=config.max_tool_calls,
     )
 
@@ -102,25 +101,24 @@ async def test_query_tool_calls_used_is_positive(
 
 
 @pytest.mark.asyncio
-async def test_query_stops_at_high_score_source(
+async def test_query_stops_when_first_source_has_results(
     mock_llm: BaseLLM,
     sample_config: RAGConfig,
 ) -> None:
-    """When first source returns results above threshold, second source is not called."""
-    high_score_results = [
-        {"id": "1", "title": "T", "source": "s", "content": "c", "score": 0.99}
+    """When first source returns any results, second source is not called."""
+    rag_results = [
+        {"id": "1", "title": "T", "source": "s", "content": "c", "score": 0.02}
     ]
-    first_source = _make_mock_source("rag", high_score_results)
+    first_source = _make_mock_source("rag", rag_results)
     second_source = _make_mock_source("web", [])
     reranker = MagicMock(spec=CrossEncoderReranker)
-    reranker.rerank = MagicMock(return_value=high_score_results)
+    reranker.rerank = MagicMock(return_value=rag_results)
 
     coordinator = PipelineCoordinator(
         sources=[first_source, second_source],
         reranker=reranker,
         synthesizer=Synthesizer(mock_llm),
         memory=ConversationMemory(),
-        threshold=sample_config.retriever.web_search_fallback_score,
         max_tool_calls=sample_config.max_tool_calls,
     )
     await coordinator.query("question")
@@ -128,14 +126,11 @@ async def test_query_stops_at_high_score_source(
 
 
 @pytest.mark.asyncio
-async def test_query_falls_through_to_second_source_on_low_score(
+async def test_query_falls_through_to_second_source_when_first_is_empty(
     mock_llm: BaseLLM,
     sample_config: RAGConfig,
 ) -> None:
-    """When first source score is below threshold, second source is called."""
-    low_score_results = [
-        {"id": "1", "title": "T", "source": "s", "content": "c", "score": 0.01}
-    ]
+    """When first source returns no results, second source is called."""
     web_results = [
         {
             "id": "2",
@@ -145,17 +140,16 @@ async def test_query_falls_through_to_second_source_on_low_score(
             "score": 0.8,
         }
     ]
-    first_source = _make_mock_source("rag", low_score_results)
+    first_source = _make_mock_source("rag", [])
     second_source = _make_mock_source("web", web_results)
     reranker = MagicMock(spec=CrossEncoderReranker)
-    reranker.rerank = MagicMock(return_value=low_score_results + web_results)
+    reranker.rerank = MagicMock(return_value=web_results)
 
     coordinator = PipelineCoordinator(
         sources=[first_source, second_source],
         reranker=reranker,
         synthesizer=Synthesizer(mock_llm),
         memory=ConversationMemory(),
-        threshold=sample_config.retriever.web_search_fallback_score,
         max_tool_calls=sample_config.max_tool_calls,
     )
     await coordinator.query("question about karpathy")

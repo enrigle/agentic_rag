@@ -31,8 +31,8 @@ Local agentic RAG system using Ollama (llama3.2) and a Notion knowledge base. Op
 - **[uv](https://docs.astral.sh/uv/getting-started/installation/)**
 - **[Ollama](https://ollama.com)**
 - **[Tesseract](https://github.com/tesseract-ocr/tesseract)** — for OCR on image blocks (`brew install tesseract` on macOS)
-- **Azure OpenAI** *(optional)* — replaces local Ollama synthesis; reduces query latency from 20–40 s to 2–4 s
-- **Redis** *(optional)* — semantic cache; cache hits return in < 5 ms
+- **Groq** *(optional)* — cloud LLM for fast synthesis; set `GROQ_API_KEY` in `.env`; falls back to Ollama if absent
+- **Redis** *(optional)* — semantic cache; cache hits return in < 5 ms (`brew install redis && brew services start redis`)
 
 ## Quickstart
 
@@ -106,7 +106,7 @@ llm:
   base_url: http://localhost:11434
 
 retriever:
-  min_similarity: 0.35   # cosine similarity cutoff for vector candidates
+  min_similarity: 0.50   # cosine similarity cutoff for vector candidates
   top_n: 5               # results returned after RRF merge
   rrf_k: 60              # RRF damping constant
   bm25_top_k: 10         # BM25 candidates before merge
@@ -116,12 +116,10 @@ ingestion:
   chunk_overlap: 100
   vision_model: llava    # Ollama model used for image captioning
 
-# Optional: Azure OpenAI for fast synthesis (replaces local Ollama chat)
-azure_openai:
-  endpoint: ""           # set via AZURE_OPENAI_ENDPOINT env var
-  deployment: "gpt-4o-mini"
-  api_version: "2024-02-01"
-  # api_key: set via AZURE_OPENAI_API_KEY env var (never in config file)
+# Optional: Groq for fast cloud synthesis (falls back to Ollama if absent)
+groq:
+  model: "llama-3.1-8b-instant"
+  # api_key: set via GROQ_API_KEY env var (never in config file)
 
 # Optional: Redis semantic cache
 redis:
@@ -130,20 +128,18 @@ redis:
   similarity_threshold: 0.95  # cosine similarity required for a cache hit
 ```
 
-### Azure OpenAI setup
+### Groq setup
 
 ```bash
-# 1. Create a free Azure account at azure.microsoft.com/free ($200 credit)
-# 2. Create an "Azure OpenAI" resource and deploy gpt-4o-mini
-# 3. Export credentials:
-export AZURE_OPENAI_ENDPOINT="https://<your-resource>.openai.azure.com/"
-export AZURE_OPENAI_API_KEY="<your-key>"
+# 1. Create an account at console.groq.com and generate an API key
+# 2. Add to .env (never commit this file):
+GROQ_API_KEY=gsk_...
 ```
 
 ### Redis setup (local dev)
 
 ```bash
-docker run -d -p 6379:6379 redis:latest
+brew install redis && brew services start redis
 ```
 
 ## Eval
@@ -169,11 +165,11 @@ flowchart TD
     H -->|vector| V["ChromaDB `chroma_db/`"]
     H -->|keyword| K["BM25 `bm25_index/`"]
     H --> R["`CrossEncoderReranker`"]
-    R --> S["`Synthesizer`\nOllamaLLM or AzureOpenAILLM"]
+    R --> S["`Synthesizer`\nGroqLLM · OllamaLLM · AzureOpenAILLM"]
     S -->|store result| RC
     S --> A["Final answer + sources"]
     A --> UI
-    Q -->|score below threshold| W["Tavily web search"]
+    Q -->|no KB results| W["Tavily web search"]
     W --> R
   end
 
@@ -194,7 +190,7 @@ flowchart TD
   end
 ```
 
-`PipelineCoordinator` runs sources in priority order with a score-based circuit breaker (`max_tool_calls`). Conversation memory is per `thread_id`.
+`PipelineCoordinator` runs sources in priority order: `RAGSource` first, `WebSource` only if the KB returns no vector results above `min_similarity`. Conversation memory is per `thread_id`.
 
 ```
 src/agentic_rag/
@@ -204,7 +200,8 @@ src/agentic_rag/
 ├── ingestion/         # Notion fetching, chunking, embedding (+ image captioning)
 ├── retrieval/         # ChromaDB, BM25, hybrid RRF, cross-encoder reranker
 ├── pipeline/          # PipelineCoordinator, sources, synthesizer, memory
-├── llm/               # BaseLLM, OllamaLLM, AzureOpenAILLM
+├── llm/               # BaseLLM, OllamaLLM, OpenAICompatLLM (Groq + Azure)
+├── health.py          # startup dependency checks
 ├── feedback/          # Store + judge + optimizer (feedback loop)
 ├── observability/     # Langfuse tracing/scoring
 ├── evaluation/        # Evaluator logic (reads/writes `evals/`)

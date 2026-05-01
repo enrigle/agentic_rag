@@ -9,7 +9,11 @@ import uuid
 from typing import TypedDict
 
 import streamlit as st
+from dotenv import load_dotenv
+load_dotenv()
+
 from agentic_rag.config import load_config
+from agentic_rag.health import run_checks
 from agentic_rag.feedback.store import FeedbackEntry, get_all, save, update_category
 from agentic_rag.feedback.judge import classify_failure
 from agentic_rag.feedback.optimizer import apply_optimization
@@ -47,6 +51,16 @@ def _run_ingest() -> None:
     except Exception as exc:  # noqa: BLE001
         _sync_state["error"] = str(exc)
         _sync_state["status"] = "error"
+
+
+@st.cache_resource
+def _service_statuses() -> list:
+    cfg = load_config()
+    return asyncio.run(run_checks(
+        ollama_url=cfg.llm.base_url,
+        redis_url=cfg.redis.url,
+        chroma_path=cfg.chroma_path,
+    ))
 
 
 @st.cache_resource
@@ -102,6 +116,15 @@ if "show_note" not in st.session_state:
 
 # ── Sidebar ────────────────────────────────────────────────────────────────────
 with st.sidebar:
+    st.header("Services")
+    for svc in _service_statuses():
+        icon = "🟢" if svc.ok else "🔴"
+        label = f"{icon} {svc.name}"
+        if svc.detail:
+            st.caption(f"{label} — {svc.detail}")
+        else:
+            st.caption(label)
+
     st.header("Conversation")
     if st.button("New conversation"):
         new_tid = str(uuid.uuid4())
