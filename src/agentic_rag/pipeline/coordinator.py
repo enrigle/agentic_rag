@@ -23,7 +23,6 @@ class PipelineCoordinator:
         reranker: CrossEncoderReranker,
         synthesizer: Synthesizer,
         memory: ConversationMemory,
-        threshold: float,
         max_tool_calls: int,
         cache: SemanticCache | None = None,
     ) -> None:
@@ -31,7 +30,6 @@ class PipelineCoordinator:
         self._reranker = reranker
         self._synthesizer = synthesizer
         self._memory = memory
-        self._threshold = threshold
         self._max_tool_calls = max_tool_calls
         self._cache = cache
 
@@ -67,15 +65,8 @@ class PipelineCoordinator:
                     ctx.results.extend(new_results)
                     ctx.tool_calls += 1
                     if new_results:
-                        best = max(r["score"] for r in new_results)
-                        if best >= self._threshold:
-                            logger.info(
-                                "%s: best score %.3f >= threshold %.3f, stopping",
-                                source.name,
-                                best,
-                                self._threshold,
-                            )
-                            break
+                        logger.info("%s: %d results found, stopping", source.name, len(new_results))
+                        break
 
                 ctx.results = self._reranker.rerank(user_query, ctx.results)
                 ctx.final_answer = await self._synthesizer.synthesize(user_query, ctx)

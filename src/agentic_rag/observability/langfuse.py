@@ -69,10 +69,13 @@ def observation(
         kwargs["model"] = model
 
     try:
-        with client.start_as_current_observation(**kwargs) as obs:
-            yield obs
+        obs_ctx = client.start_as_current_observation(**kwargs)
     except Exception:  # noqa: BLE001
         yield None
+        return
+
+    with obs_ctx as obs:
+        yield obs
 
 
 def score_trace(

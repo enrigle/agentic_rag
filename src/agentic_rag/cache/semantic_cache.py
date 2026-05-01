@@ -25,15 +25,17 @@ class SemanticCache:
         self._redis: aioredis.Redis = aioredis.Redis.from_url(
             config.url, decode_responses=False
         )
+        self._available = True
 
     async def get(self, query: str) -> Optional[QueryResult]:
         """Return cached QueryResult for the best-matching similar query, else None."""
+        if not self._available:
+            return None
+
         try:
             vec = await self._embed_llm.embed(query)
         except Exception:
-            logger.warning(
-                "embed() failed during cache lookup; skipping cache", exc_info=True
-            )
+            logger.debug("embed() failed during cache lookup; skipping cache")
             return None
 
         query_arr = np.array(vec, dtype=np.float32)
@@ -54,7 +56,8 @@ class SemanticCache:
                 if cursor == 0:
                     break
         except aioredis.RedisError:
-            logger.warning("Redis SCAN failed; skipping cache lookup", exc_info=True)
+            self._available = False
+            logger.warning("Redis unavailable at %s; cache disabled", self._config.url)
             return None
 
         if not keys:
@@ -116,6 +119,9 @@ class SemanticCache:
 
     async def set(self, query: str, result: QueryResult) -> None:
         """Store query result in Redis with TTL."""
+        if not self._available:
+            return
+
         try:
             vec = await self._embed_llm.embed(query)
             arr = np.array(vec, dtype=np.float32)
@@ -134,7 +140,8 @@ class SemanticCache:
                 ),
             )
             await cast(Any, self._redis.expire(key, self._config.ttl_seconds))
+        except aioredis.RedisError:
+            self._available = False
+            logger.warning("Redis unavailable at %s; cache disabled", self._config.url)
         except Exception:
-            logger.warning(
-                "Failed to store result in cache; failing open", exc_info=True
-            )
+            logger.debug("Failed to store result in cache; skipping")

@@ -53,7 +53,6 @@ def create_pipeline(config: RAGConfig | None = None) -> PipelineCoordinator:
         ),
         synthesizer=Synthesizer(synth_llm),
         memory=ConversationMemory(),
-        threshold=config.retriever.web_search_fallback_score,
         max_tool_calls=config.max_tool_calls,
         cache=cache,
     )

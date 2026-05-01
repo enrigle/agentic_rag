@@ -268,3 +268,48 @@ async def test_set_fails_open_on_redis_error(
 
     # Must not raise
     await cache.set("any query", _make_result())
+
+
+async def test_get_disables_cache_after_redis_error() -> None:
+    """After first Redis failure _available flips False; subsequent calls skip Redis."""
+    mock_redis = MagicMock()
+    mock_redis.scan = AsyncMock(side_effect=aioredis.ConnectionError("down"))
+
+    with patch(
+        "agentic_rag.cache.semantic_cache.aioredis.Redis.from_url",
+        return_value=mock_redis,
+    ):
+        cfg = RedisConfig(url="redis://localhost:6379", ttl_seconds=60, similarity_threshold=0.9)
+        embed_llm = MagicMock()
+        embed_llm.embed = AsyncMock(return_value=[1.0, 0.0, 0.0])
+        c = SemanticCache(cfg, embed_llm)
+
+    assert c._available is True
+    await c.get("first query")
+    assert c._available is False
+
+    mock_redis.scan.reset_mock()
+    await c.get("second query")
+    mock_redis.scan.assert_not_called()
+
+
+async def test_set_disables_cache_after_redis_error() -> None:
+    """set() also flips _available on RedisError; subsequent set() skips Redis."""
+    mock_redis = MagicMock()
+    mock_redis.hset = AsyncMock(side_effect=aioredis.RedisError("write failed"))
+
+    with patch(
+        "agentic_rag.cache.semantic_cache.aioredis.Redis.from_url",
+        return_value=mock_redis,
+    ):
+        cfg = RedisConfig(url="redis://localhost:6379", ttl_seconds=60, similarity_threshold=0.9)
+        embed_llm = MagicMock()
+        embed_llm.embed = AsyncMock(return_value=[1.0, 0.0, 0.0])
+        c = SemanticCache(cfg, embed_llm)
+
+    await c.set("query", _make_result())
+    assert c._available is False
+
+    mock_redis.hset.reset_mock()
+    await c.set("another query", _make_result())
+    mock_redis.hset.assert_not_called()

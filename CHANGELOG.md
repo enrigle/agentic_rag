@@ -6,6 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-05-01
+
+### Added
+- **Groq LLM support** — `GroqLLM` backed by Groq's OpenAI-compatible API (`llama-3.1-8b-instant` default); no separate `groq` package, uses `openai` client with `base_url`
+- **`OpenAICompatLLM` base class** — merged `azure_openai.py` and `groq_llm.py` into `llm/openai_compat.py`; shared `chat()` and `embed()` logic; `AzureOpenAILLM` and `GroqLLM` are thin subclasses with only `__init__`
+- **`is_configured()` on `GroqConfig` and `AzureOpenAIConfig`** — checks config field and env var; replaces exception-driven provider detection in `rag_pipeline.py`
+- **Startup health checks** — `health.py` probes Ollama, Redis, Groq, and ChromaDB at launch; results shown in Streamlit sidebar as coloured status indicators
+- **`SemanticCache` circuit breaker** — `_available` flag flips `False` on first Redis failure; subsequent calls skip Redis silently instead of logging a full traceback on every query
+- `load_dotenv()` called at app startup so `.env` credentials are always loaded
+
+### Changed
+- **Web search fallback logic overhauled** — previous score-based threshold (`web_search_fallback_score: 0.4`) was permanently unreachable because RRF scores cap at ~0.033; replaced with result-count check: any non-empty RAGSource result stops the source chain
+- **`HybridRetriever` returns empty when no vector results** — BM25 always returns candidates, which previously blocked web fallback for out-of-KB queries; now if ChromaDB finds nothing above `min_similarity`, the retriever returns `[]` regardless of BM25 hits
+- **`min_similarity` raised from `0.35` to `0.50`** — reduces false-positive KB matches for loosely-related queries
+- **`PipelineCoordinator`** — removed `threshold` parameter; web fallback is now `if new_results: break`
+- **Langfuse `observation` context manager** — fixed double-yield bug that caused `RuntimeError: generator didn't stop after throw()` when an exception occurred inside the `with` block
+- `GroqConfig` added to `RAGConfig`; `web_search_fallback_score` removed from `RetrieverConfig`
+- `groq` package removed from dependencies (functionality covered by `openai>=1.0`)
+
+### Fixed
+- `SemanticCache` logged a full Redis traceback on every query when Redis was unreachable; now logs one `WARNING` line and goes silent for the session
+- Provider selection in `rag_pipeline.py` used `try/except ValueError` to detect missing credentials; replaced with explicit `is_configured()` checks
+
 ## [0.7.0] - 2026-04-29
 
 ### Added

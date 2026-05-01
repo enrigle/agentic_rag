@@ -70,3 +70,22 @@ async def test_hybrid_search_skips_ids_missing_from_fetch() -> None:
     retriever = HybridRetriever(vector_store, keyword, cfg)
     results = await retriever.search([0.0], "query")
     assert results == []
+
+
+@pytest.mark.asyncio
+async def test_hybrid_search_returns_empty_when_no_vector_results() -> None:
+    """BM25-only results must not block web search fallback."""
+    cfg = RAGConfig(retriever=RetrieverConfig(top_n=3, bm25_top_k=10, rrf_k=60))
+
+    vector_store = MagicMock()
+    vector_store.search = AsyncMock(return_value=[])  # nothing above min_similarity
+    vector_store.fetch_by_ids = AsyncMock(return_value=[])
+
+    keyword = MagicMock()
+    keyword.search = MagicMock(return_value=["doc1", "doc2"])  # BM25 finds results
+
+    retriever = HybridRetriever(vector_store, keyword, cfg)
+    results = await retriever.search([0.1, 0.2], "ulan bator")
+
+    assert results == []
+    vector_store.fetch_by_ids.assert_not_called()
