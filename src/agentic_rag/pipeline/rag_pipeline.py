@@ -7,8 +7,8 @@ import logging
 from agentic_rag.cache.semantic_cache import SemanticCache
 from agentic_rag.config import RAGConfig, load_config
 from agentic_rag.llm.base import BaseLLM
-from agentic_rag.llm.azure_openai import AzureOpenAILLM
 from agentic_rag.llm.ollama import OllamaLLM
+from agentic_rag.llm.openai_compat import AzureOpenAILLM, GroqLLM
 from agentic_rag.pipeline.coordinator import PipelineCoordinator
 from agentic_rag.pipeline.memory import ConversationMemory
 from agentic_rag.pipeline.sources import RAGSource, WebSource
@@ -25,8 +25,8 @@ def create_pipeline(config: RAGConfig | None = None) -> PipelineCoordinator:
     """Wire PipelineCoordinator from config.
 
     - Embeddings always use OllamaLLM (local, private).
-    - Synthesis uses AzureOpenAILLM when azure_openai.endpoint is set,
-      otherwise falls back to OllamaLLM.
+    - Synthesis uses GroqLLM when GROQ_API_KEY is set, then AzureOpenAILLM when
+      azure_openai.endpoint is set, otherwise falls back to OllamaLLM.
     - SemanticCache is always attached; it fails open if Redis is unreachable.
     """
     if config is None:
@@ -36,17 +36,12 @@ def create_pipeline(config: RAGConfig | None = None) -> PipelineCoordinator:
     hybrid = HybridRetriever(ChromaVectorStore(config), BM25Retriever(config), config)
 
     synth_llm: BaseLLM = llm
-    if config.azure_openai.endpoint:
-        try:
-            synth_llm = AzureOpenAILLM(config.azure_openai)
-            logger.info(
-                "Synthesis: AzureOpenAILLM (deployment=%s)",
-                config.azure_openai.deployment,
-            )
-        except ValueError as exc:
-            logger.warning(
-                "Azure OpenAI not configured (%s); falling back to OllamaLLM", exc
-            )
+    if config.groq.is_configured():
+        synth_llm = GroqLLM(config.groq)
+        logger.info("Synthesis: GroqLLM (model=%s)", config.groq.model)
+    elif config.azure_openai.is_configured():
+        synth_llm = AzureOpenAILLM(config.azure_openai)
+        logger.info("Synthesis: AzureOpenAILLM (deployment=%s)", config.azure_openai.deployment)
 
     cache = SemanticCache(config.redis, llm)
 

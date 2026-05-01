@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import logging
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional, TypeVar
@@ -43,11 +44,23 @@ class IngestionConfig:
 
 
 @dataclass
+class GroqConfig:
+    model: str = "llama-3.1-8b-instant"
+    api_key: Optional[str] = None
+
+    def is_configured(self) -> bool:
+        return bool(self.api_key or os.environ.get("GROQ_API_KEY"))
+
+
+@dataclass
 class AzureOpenAIConfig:
     endpoint: str = ""
     api_key: Optional[str] = None
     deployment: str = "gpt-4o-mini"
     api_version: str = "2024-02-01"
+
+    def is_configured(self) -> bool:
+        return bool(self.endpoint and (self.api_key or os.environ.get("AZURE_OPENAI_API_KEY")))
 
 
 @dataclass
@@ -66,6 +79,7 @@ class RAGConfig:
     llm: LLMConfig = field(default_factory=LLMConfig)
     retriever: RetrieverConfig = field(default_factory=RetrieverConfig)
     ingestion: IngestionConfig = field(default_factory=IngestionConfig)
+    groq: GroqConfig = field(default_factory=GroqConfig)
     azure_openai: AzureOpenAIConfig = field(default_factory=AzureOpenAIConfig)
     redis: RedisConfig = field(default_factory=RedisConfig)
 
@@ -106,6 +120,7 @@ def load_config(path: Path | None = None) -> RAGConfig:
     llm_cfg = _parse_sub(LLMConfig, raw.get("llm") or {})
     retriever_cfg = _parse_sub(RetrieverConfig, raw.get("retriever") or {})
     ingestion_cfg = _parse_sub(IngestionConfig, raw.get("ingestion") or {})
+    groq_cfg = _parse_sub(GroqConfig, raw.get("groq") or {})
     azure_openai_cfg = _parse_sub(AzureOpenAIConfig, raw.get("azure_openai") or {})
     redis_cfg = _parse_sub(RedisConfig, raw.get("redis") or {})
 
@@ -118,6 +133,7 @@ def load_config(path: Path | None = None) -> RAGConfig:
             llm=llm_cfg,
             retriever=retriever_cfg,
             ingestion=ingestion_cfg,
+            groq=groq_cfg,
             azure_openai=azure_openai_cfg,
             redis=redis_cfg,
         )
@@ -129,6 +145,7 @@ def load_config(path: Path | None = None) -> RAGConfig:
             llm=llm_cfg,
             retriever=retriever_cfg,
             ingestion=ingestion_cfg,
+            groq=groq_cfg,
             azure_openai=azure_openai_cfg,
             redis=redis_cfg,
         )

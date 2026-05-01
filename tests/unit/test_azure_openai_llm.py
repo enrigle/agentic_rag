@@ -9,7 +9,7 @@ import openai
 import pytest
 
 from agentic_rag.config import AzureOpenAIConfig
-from agentic_rag.llm.azure_openai import AzureOpenAILLM
+from agentic_rag.llm.openai_compat import AzureOpenAILLM
 
 _VALID_CONFIG = AzureOpenAIConfig(
     endpoint="https://my-resource.openai.azure.com",
@@ -22,7 +22,7 @@ _VALID_CONFIG = AzureOpenAIConfig(
 @pytest.fixture
 def llm() -> Generator[AzureOpenAILLM, None, None]:
     """Construct AzureOpenAILLM with a patched client constructor held open."""
-    with patch("agentic_rag.llm.azure_openai.openai.AsyncAzureOpenAI") as mock_cls:
+    with patch("agentic_rag.llm.openai_compat.openai.AsyncAzureOpenAI") as mock_cls:
         instance = AzureOpenAILLM(_VALID_CONFIG)
         instance._client = mock_cls.return_value
         yield instance
@@ -64,7 +64,7 @@ def test_init_accepts_api_key_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
         endpoint="https://x.openai.azure.com",
         api_key=None,
     )
-    with patch("agentic_rag.llm.azure_openai.openai.AsyncAzureOpenAI") as mock_cls:
+    with patch("agentic_rag.llm.openai_compat.openai.AsyncAzureOpenAI") as mock_cls:
         AzureOpenAILLM(config)
     mock_cls.assert_called_once_with(
         azure_endpoint=config.endpoint,
