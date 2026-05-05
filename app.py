@@ -156,7 +156,8 @@ with st.sidebar:
     optimize_disabled = rated_count < 10
     if st.button("Optimize", disabled=optimize_disabled, help="Requires 10+ ratings"):
         with st.spinner("Optimizing..."):
-            result = apply_optimization(all_entries)
+            _cfg = load_config()
+            result = apply_optimization(all_entries, few_shot_max=_cfg.retriever.few_shot_max)
         parts = []
         if result.new_min_similarity is not None:
             parts.append(f"min_similarity → {result.new_min_similarity}")
