@@ -33,6 +33,7 @@ class RetrieverConfig:
     bm25_top_k: int = 10
     reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-2-v2"
     reranker_top_k: int = 5
+    few_shot_max: int = 3
 
 
 @dataclass
