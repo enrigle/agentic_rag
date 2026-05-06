@@ -23,7 +23,7 @@ To answer follow-up questions, the app keeps a rolling in-memory chat history pe
 #TODO: Add minikube
 #TODO: Add some cloud options to expose the RAG apps
 
-Local agentic RAG system using Ollama (llama3.2) and a Notion knowledge base. Optionally uses Azure OpenAI for fast synthesis and Redis for semantic caching.
+Local agentic RAG system using Ollama (llama3.2) and a Notion knowledge base. Optionally uses Groq or Azure OpenAI for fast cloud synthesis and Redis for semantic caching.
 
 ## Prerequisites
 
@@ -32,6 +32,7 @@ Local agentic RAG system using Ollama (llama3.2) and a Notion knowledge base. Op
 - **[Ollama](https://ollama.com)**
 - **[Tesseract](https://github.com/tesseract-ocr/tesseract)** — for OCR on image blocks (`brew install tesseract` on macOS)
 - **Groq** *(optional)* — cloud LLM for fast synthesis; set `GROQ_API_KEY` in `.env`; falls back to Ollama if absent
+- **Azure OpenAI** *(optional)* — alternative cloud LLM; set `AZURE_OPENAI_API_KEY` + endpoint in `.env`
 - **Redis** *(optional)* — semantic cache; cache hits return in < 5 ms (`brew install redis && brew services start redis`)
 
 ## Quickstart
@@ -64,7 +65,7 @@ uv run python main.py
 uv run streamlit run app.py
 ```
 
-Use the sidebar → **Chunking** to paste text and preview chunk counts and character lengths for different `ingestion.chunk_size` / `ingestion.chunk_overlap` values.
+The sidebar shows live **service health** (Ollama, Redis, Groq, ChromaDB) and a **Chunking** tool to paste text and preview chunk counts for different `ingestion.chunk_size` / `ingestion.chunk_overlap` values.
 
 ### Notion setup (step 4)
 
@@ -106,20 +107,30 @@ llm:
   base_url: http://localhost:11434
 
 retriever:
-  min_similarity: 0.50   # cosine similarity cutoff for vector candidates
-  top_n: 5               # results returned after RRF merge
-  rrf_k: 60              # RRF damping constant
-  bm25_top_k: 10         # BM25 candidates before merge
+  min_similarity: 0.50        # cosine similarity cutoff for vector candidates
+  top_n: 20                   # RRF candidates passed to reranker
+  rrf_k: 60                   # RRF damping constant
+  bm25_top_k: 10              # BM25 candidates before merge
+  reranker_model: cross-encoder/ms-marco-MiniLM-L-2-v2
+  reranker_top_k: 5           # results returned after reranking
+  few_shot_max: 3             # max thumbs-up examples injected into the prompt
 
 ingestion:
   chunk_size: 800
   chunk_overlap: 100
-  vision_model: llava    # Ollama model used for image captioning
+  vision_model: llava         # Ollama model used for image captioning
 
 # Optional: Groq for fast cloud synthesis (falls back to Ollama if absent)
 groq:
   model: "llama-3.1-8b-instant"
   # api_key: set via GROQ_API_KEY env var (never in config file)
+
+# Optional: Azure OpenAI (alternative to Groq)
+azure_openai:
+  endpoint: ""                # set via AZURE_OPENAI_ENDPOINT env var
+  deployment: "gpt-4o-mini"
+  api_version: "2024-02-01"
+  # api_key: set via AZURE_OPENAI_API_KEY env var
 
 # Optional: Redis semantic cache
 redis:
@@ -134,6 +145,14 @@ redis:
 # 1. Create an account at console.groq.com and generate an API key
 # 2. Add to .env (never commit this file):
 GROQ_API_KEY=gsk_...
+```
+
+### Azure OpenAI setup (alternative to Groq)
+
+```bash
+# Add to .env:
+AZURE_OPENAI_API_KEY=...
+AZURE_OPENAI_ENDPOINT=https://<your-resource>.openai.azure.com/
 ```
 
 ### Redis setup (local dev)

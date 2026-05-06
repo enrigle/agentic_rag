@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+- **`few_shot_max` now configurable** — removed hardcoded `3` from `get_few_shot_examples()`; exposed as `retriever.few_shot_max` in `config/default.yaml` and passed through `apply_optimization()`
+
 ## [0.8.0] - 2026-05-01
 
 ### Added
