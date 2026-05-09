@@ -97,13 +97,18 @@ def load_config(path: Path | None = None) -> RAGConfig:
     """Load RAGConfig from YAML, falling back to defaults for missing keys.
 
     Args:
-        path: Path to a YAML config file. If None, uses
+        path: Path to a YAML config file. If None, checks the
+              ``RAG_CONFIG_PATH`` env var, then falls back to
               ``config/default.yaml`` relative to the package root.
 
     Returns:
         A fully populated RAGConfig instance.
     """
-    resolved = path if path is not None else _DEFAULT_CONFIG_PATH
+    if path is None:
+        env_path = os.environ.get("RAG_CONFIG_PATH")
+        resolved = Path(env_path) if env_path else _DEFAULT_CONFIG_PATH
+    else:
+        resolved = path
 
     if not resolved.exists():
         logger.warning("Config file not found at %s; using all defaults.", resolved)

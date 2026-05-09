@@ -6,8 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-05-09
+
+### Added
+- **Docker support** — `Dockerfile` (python:3.12-slim-bookworm, two-stage layer cache for deps), `docker-compose.yml` (app + Redis 7), `.env.example`, `.dockerignore`
+- **`config/docker.yaml`** — Docker-specific config; Ollama pointed at `host.docker.internal:11434` so the host GPU/Metal is used; Redis URL set to `redis://redis:6379` for the compose-managed service
+- **`RAG_CONFIG_PATH` env var** — `load_config()` checks this env var before falling back to `config/default.yaml`; `docker-compose.yml` injects `config/docker.yaml` via this var
+- Docker quickstart section in README (build, run, ingestion inside container, data volume persistence)
+
 ### Changed
 - **`few_shot_max` now configurable** — removed hardcoded `3` from `get_few_shot_examples()`; exposed as `retriever.few_shot_max` in `config/default.yaml` and passed through `apply_optimization()`
+- Updated few-shot examples in `feedback_config.json` — replaced Claude hooks / weather / Anthropic founder queries with autoresearch, Datadog, and agentic scaling
 
 ## [0.8.0] - 2026-05-01
 
