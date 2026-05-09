@@ -95,6 +95,13 @@ class HybridRetriever:
                 "HybridRetriever.search: BM25 returned %d candidates", len(bm25_ids)
             )
 
+        # No vector results means nothing in the KB cleared min_similarity — signal
+        # the coordinator to fall through to web search rather than returning
+        # BM25-only results, which have no semantic relevance guarantee.
+        if not vector_ids:
+            logger.info("HybridRetriever.search: no vector results above min_similarity threshold")
+            return []
+
         # --- RRF merge ---
         merged_ids, rrf_scores = _rrf_merge(
             vector_ids, bm25_ids, k=cfg.rrf_k, top_n=cfg.top_n

@@ -1,0 +1,26 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8502:8501"
+    env_file:
+      - .env
+    environment:
+      - RAG_CONFIG_PATH=config/docker.yaml
+      - TRANSFORMERS_VERBOSITY=error
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./data/chroma_db:/app/data/chroma_db
+      - ./data/bm25_index:/app/data/bm25_index
+      - ./evals:/app/evals
+    depends_on:
+      - redis
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis_data:/data
+
+volumes:
+  redis_data:
