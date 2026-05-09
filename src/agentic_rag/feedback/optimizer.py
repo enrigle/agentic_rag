@@ -42,10 +42,12 @@ def tune_retrieval_params(entries: list[FeedbackEntry]) -> float | None:
     return round(suggested, 4)
 
 
-def get_few_shot_examples(entries: list[FeedbackEntry]) -> list[dict[str, str]]:
-    """Return the 3 most recent thumbs-up (query, answer) pairs, newest first."""
+def get_few_shot_examples(
+    entries: list[FeedbackEntry], max_examples: int = 3
+) -> list[dict[str, str]]:
+    """Return the most recent thumbs-up (query, answer) pairs, newest first."""
     thumbs_up = [e for e in reversed(entries) if e.rating == 1]
-    return [{"query": e.query, "answer": e.answer} for e in thumbs_up[:3]]
+    return [{"query": e.query, "answer": e.answer} for e in thumbs_up[:max_examples]]
 
 
 def get_kb_gaps(entries: list[FeedbackEntry]) -> list[str]:
@@ -57,6 +59,7 @@ def apply_optimization(
     entries: list[FeedbackEntry],
     config_path: Path = Path("config/default.yaml"),
     feedback_config_path: Path = Path("feedback_config.json"),
+    few_shot_max: int = 3,
 ) -> OptimizationResult:
     """Run all three optimizations and persist results to disk."""
     # 1. Retrieval param tuning
@@ -72,7 +75,7 @@ def apply_optimization(
             new_min_sim = None
 
     # 2. Few-shot examples
-    examples = get_few_shot_examples(entries)
+    examples = get_few_shot_examples(entries, max_examples=few_shot_max)
     try:
         feedback_config_path.write_text(
             json.dumps({"few_shot_examples": examples}, indent=2, ensure_ascii=False)

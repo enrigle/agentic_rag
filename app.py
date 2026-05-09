@@ -1,17 +1,27 @@
 # app.py
+import logging
 import asyncio
+
+logging.getLogger("streamlit.watcher.local_sources_watcher").setLevel(logging.ERROR)
+logging.getLogger("transformers").setLevel(logging.ERROR)
 import threading
 import uuid
 from typing import TypedDict
 
 import streamlit as st
-from main import AgenticRAGSystem
+from dotenv import load_dotenv
+load_dotenv()
+
 from agentic_rag.config import load_config
+from agentic_rag.health import run_checks
 from agentic_rag.feedback.store import FeedbackEntry, get_all, save, update_category
 from agentic_rag.feedback.judge import classify_failure
 from agentic_rag.feedback.optimizer import apply_optimization
 from agentic_rag.ingestion.notion import NotionIngester
 from agentic_rag.llm.ollama import OllamaLLM
+from agentic_rag.models import QueryResult
+from agentic_rag.pipeline.coordinator import PipelineCoordinator
+from agentic_rag.pipeline.rag_pipeline import create_pipeline
 
 
 class _SyncState(TypedDict):
@@ -44,8 +54,38 @@ def _run_ingest() -> None:
 
 
 @st.cache_resource
-def get_system() -> AgenticRAGSystem:
-    return AgenticRAGSystem()
+def _service_statuses() -> list:
+    cfg = load_config()
+    return asyncio.run(run_checks(
+        ollama_url=cfg.llm.base_url,
+        redis_url=cfg.redis.url,
+        chroma_path=cfg.chroma_path,
+    ))
+
+
+@st.cache_resource
+def get_pipeline() -> PipelineCoordinator:
+    return create_pipeline()
+
+
+def _to_result_dict(result: QueryResult) -> dict:
+    """Convert QueryResult dataclass to the dict shape app.py renders."""
+    return {
+        "answer": result.answer,
+        "sources": [
+            {
+                "index": i + 1,
+                "url": s.source,
+                "title": s.title,
+                "content": s.content,
+                "score": s.score,
+            }
+            for i, s in enumerate(result.sources)
+        ],
+        "tool_calls_used": result.tool_calls_used,
+        "latency_ms": result.latency_ms,
+        "top_score": max((s.score for s in result.sources), default=0.0),
+    }
 
 
 @st.cache_resource
@@ -76,6 +116,15 @@ if "show_note" not in st.session_state:
 
 # ── Sidebar ────────────────────────────────────────────────────────────────────
 with st.sidebar:
+    st.header("Services")
+    for svc in _service_statuses():
+        icon = "🟢" if svc.ok else "🔴"
+        label = f"{icon} {svc.name}"
+        if svc.detail:
+            st.caption(f"{label} — {svc.detail}")
+        else:
+            st.caption(label)
+
     st.header("Conversation")
     if st.button("New conversation"):
         new_tid = str(uuid.uuid4())
@@ -107,7 +156,8 @@ with st.sidebar:
     optimize_disabled = rated_count < 10
     if st.button("Optimize", disabled=optimize_disabled, help="Requires 10+ ratings"):
         with st.spinner("Optimizing..."):
-            result = apply_optimization(all_entries)
+            _cfg = load_config()
+            result = apply_optimization(all_entries, few_shot_max=_cfg.retriever.few_shot_max)
         parts = []
         if result.new_min_similarity is not None:
             parts.append(f"min_similarity → {result.new_min_similarity}")
@@ -136,7 +186,7 @@ for msg in st.session_state.messages:
                     for s in r["sources"]:
                         st.markdown(
                             f'<a href="{s["url"]}" target="_blank" rel="noopener noreferrer">'
-                            f'{s["index"]}. {s["title"]}</a>',
+                            f"{s['index']}. {s['title']}</a>",
                             unsafe_allow_html=True,
                         )
             st.caption(
@@ -224,8 +274,10 @@ query = st.chat_input("Ask a question")
 if query:
     st.session_state.messages.append({"role": "user", "content": query, "result": None})
     with st.spinner("Thinking..."):
-        result = asyncio.run(
-            get_system().query(query, thread_id=st.session_state.thread_id)
+        result = _to_result_dict(
+            asyncio.run(
+                get_pipeline().query(query, thread_id=st.session_state.thread_id)
+            )
         )
     st.session_state.messages.append(
         {"role": "assistant", "content": result["answer"], "result": result}

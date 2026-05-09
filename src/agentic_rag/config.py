@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import dataclasses
 import logging
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any, Optional, TypeVar
 
 import yaml  # type: ignore[import-untyped]
 
@@ -30,9 +31,9 @@ class RetrieverConfig:
     top_n: int = 20
     rrf_k: int = 60
     bm25_top_k: int = 10
-    web_search_fallback_score: float = 0.4
     reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-2-v2"
     reranker_top_k: int = 5
+    few_shot_max: int = 3
 
 
 @dataclass
@@ -40,6 +41,33 @@ class IngestionConfig:
     chunk_size: int = 800
     chunk_overlap: int = 100
     vision_model: str = "llava"
+
+
+@dataclass
+class GroqConfig:
+    model: str = "llama-3.1-8b-instant"
+    api_key: Optional[str] = None
+
+    def is_configured(self) -> bool:
+        return bool(self.api_key or os.environ.get("GROQ_API_KEY"))
+
+
+@dataclass
+class AzureOpenAIConfig:
+    endpoint: str = ""
+    api_key: Optional[str] = None
+    deployment: str = "gpt-4o-mini"
+    api_version: str = "2024-02-01"
+
+    def is_configured(self) -> bool:
+        return bool(self.endpoint and (self.api_key or os.environ.get("AZURE_OPENAI_API_KEY")))
+
+
+@dataclass
+class RedisConfig:
+    url: str = "redis://localhost:6379"
+    ttl_seconds: int = 3600
+    similarity_threshold: float = 0.95
 
 
 @dataclass
@@ -51,6 +79,9 @@ class RAGConfig:
     llm: LLMConfig = field(default_factory=LLMConfig)
     retriever: RetrieverConfig = field(default_factory=RetrieverConfig)
     ingestion: IngestionConfig = field(default_factory=IngestionConfig)
+    groq: GroqConfig = field(default_factory=GroqConfig)
+    azure_openai: AzureOpenAIConfig = field(default_factory=AzureOpenAIConfig)
+    redis: RedisConfig = field(default_factory=RedisConfig)
 
 
 _DC = TypeVar("_DC")
@@ -66,13 +97,18 @@ def load_config(path: Path | None = None) -> RAGConfig:
     """Load RAGConfig from YAML, falling back to defaults for missing keys.
 
     Args:
-        path: Path to a YAML config file. If None, uses
+        path: Path to a YAML config file. If None, checks the
+              ``RAG_CONFIG_PATH`` env var, then falls back to
               ``config/default.yaml`` relative to the package root.
 
     Returns:
         A fully populated RAGConfig instance.
     """
-    resolved = path if path is not None else _DEFAULT_CONFIG_PATH
+    if path is None:
+        env_path = os.environ.get("RAG_CONFIG_PATH")
+        resolved = Path(env_path) if env_path else _DEFAULT_CONFIG_PATH
+    else:
+        resolved = path
 
     if not resolved.exists():
         logger.warning("Config file not found at %s; using all defaults.", resolved)
@@ -89,6 +125,9 @@ def load_config(path: Path | None = None) -> RAGConfig:
     llm_cfg = _parse_sub(LLMConfig, raw.get("llm") or {})
     retriever_cfg = _parse_sub(RetrieverConfig, raw.get("retriever") or {})
     ingestion_cfg = _parse_sub(IngestionConfig, raw.get("ingestion") or {})
+    groq_cfg = _parse_sub(GroqConfig, raw.get("groq") or {})
+    azure_openai_cfg = _parse_sub(AzureOpenAIConfig, raw.get("azure_openai") or {})
+    redis_cfg = _parse_sub(RedisConfig, raw.get("redis") or {})
 
     top_level_keys = {"chroma_path", "bm25_path", "collection_name", "max_tool_calls"}
     top_level = {k: v for k, v in raw.items() if k in top_level_keys}
@@ -99,6 +138,9 @@ def load_config(path: Path | None = None) -> RAGConfig:
             llm=llm_cfg,
             retriever=retriever_cfg,
             ingestion=ingestion_cfg,
+            groq=groq_cfg,
+            azure_openai=azure_openai_cfg,
+            redis=redis_cfg,
         )
     except TypeError as exc:
         logger.warning(
@@ -108,4 +150,7 @@ def load_config(path: Path | None = None) -> RAGConfig:
             llm=llm_cfg,
             retriever=retriever_cfg,
             ingestion=ingestion_cfg,
+            groq=groq_cfg,
+            azure_openai=azure_openai_cfg,
+            redis=redis_cfg,
         )

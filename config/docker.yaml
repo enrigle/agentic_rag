@@ -1,12 +1,12 @@
-chroma_path: ./chroma_db
-bm25_path: ./bm25_index
+chroma_path: /app/data/chroma_db
+bm25_path: /app/data/bm25_index
 collection_name: notion_kb
 max_tool_calls: 5
 
 llm:
   model: llama3.2
   embed_model: nomic-embed-text
-  base_url: http://localhost:11434
+  base_url: http://host.docker.internal:11434
 
 retriever:
   min_similarity: 0.50
@@ -31,6 +31,6 @@ azure_openai:
   api_version: "2024-02-01"
 
 redis:
-  url: "redis://localhost:6379"
+  url: "redis://redis:6379"
   ttl_seconds: 3600
   similarity_threshold: 0.95
