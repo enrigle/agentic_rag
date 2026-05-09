@@ -1,0 +1,36 @@
+chroma_path: /app/data/chroma_db
+bm25_path: /app/data/bm25_index
+collection_name: notion_kb
+max_tool_calls: 5
+
+llm:
+  model: llama3.2
+  embed_model: nomic-embed-text
+  base_url: http://host.docker.internal:11434
+
+retriever:
+  min_similarity: 0.50
+  top_n: 20
+  rrf_k: 60
+  bm25_top_k: 10
+  reranker_model: cross-encoder/ms-marco-MiniLM-L-2-v2
+  reranker_top_k: 5
+  few_shot_max: 3
+
+ingestion:
+  chunk_size: 800
+  chunk_overlap: 100
+  vision_model: ""
+
+groq:
+  model: "llama-3.1-8b-instant"
+
+azure_openai:
+  endpoint: ""
+  deployment: "gpt-4o-mini"
+  api_version: "2024-02-01"
+
+redis:
+  url: "redis://redis:6379"
+  ttl_seconds: 3600
+  similarity_threshold: 0.95

@@ -18,11 +18,6 @@ export LANGFUSE_HOST=...   # optional (cloud or self-hosted)
 
 To answer follow-up questions, the app keeps a rolling in-memory chat history per `thread_id` and uses it as extra context for retrieval + synthesis. Pass a stable `thread_id` when calling `AgenticRAGSystem.query()`. The Streamlit UI automatically generates a per-session `thread_id`.
 
-#TODO: Add github actions
-#TODO: Add docker compose
-#TODO: Add minikube
-#TODO: Add some cloud options to expose the RAG apps
-
 Local agentic RAG system using Ollama (llama3.2) and a Notion knowledge base. Optionally uses Groq or Azure OpenAI for fast cloud synthesis and Redis for semantic caching.
 
 ## Prerequisites
@@ -58,6 +53,48 @@ uv run python ingest.py
 # 6. Run a query
 uv run python main.py
 ```
+
+## Docker
+
+Runs the Streamlit app and Redis in containers. Ollama stays on your host machine so it keeps GPU/Metal access.
+
+**Prerequisites:**
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) installed and running
+- Ollama running on your host: `ollama serve`
+- Models pulled (one-time): `ollama pull llama3.2 && ollama pull nomic-embed-text`
+
+```bash
+# 1. Copy the secrets template and fill in your keys
+cp .env.example .env
+
+# 2. Build the image and start all services
+docker compose up --build
+
+# 3. Open the app
+open http://localhost:8501
+```
+
+On subsequent starts (no code changes), skip `--build`:
+
+```bash
+docker compose up
+```
+
+**Run ingestion inside the container** (indexes your Notion workspace into the Docker volume):
+
+```bash
+docker compose run --rm app uv run python ingest.py
+```
+
+**Stop everything:**
+
+```bash
+docker compose down
+```
+
+Your ChromaDB and BM25 indexes are stored in `./data/` on your machine and survive restarts. To wipe them and start fresh: `rm -rf ./data/`.
+
+---
 
 ## UI (Streamlit)
 
