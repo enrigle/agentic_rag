@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
-DB_PATH = Path("feedback.db")
+DB_PATH = Path("data/feedback.db")
 
 _CREATE_TABLE = """
 CREATE TABLE IF NOT EXISTS feedback (

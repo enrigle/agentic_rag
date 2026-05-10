@@ -11,8 +11,7 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
-      - ./data/chroma_db:/app/data/chroma_db
-      - ./data/bm25_index:/app/data/bm25_index
+      - ./data:/app/data
       - ./evals:/app/evals
     depends_on:
       - redis

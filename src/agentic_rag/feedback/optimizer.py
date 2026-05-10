@@ -58,7 +58,7 @@ def get_kb_gaps(entries: list[FeedbackEntry]) -> list[str]:
 def apply_optimization(
     entries: list[FeedbackEntry],
     config_path: Path = Path("config/default.yaml"),
-    feedback_config_path: Path = Path("feedback_config.json"),
+    feedback_config_path: Path = Path("data/feedback_config.json"),
     few_shot_max: int = 3,
 ) -> OptimizationResult:
     """Run all three optimizations and persist results to disk."""

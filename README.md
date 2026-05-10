@@ -48,10 +48,10 @@ ollama serve
 export NOTION_TOKEN=secret_xxx
 
 # 5. Index your Notion workspace
-uv run python ingest.py
+uv run python scripts/ingest.py
 
 # 6. Run a query
-uv run python main.py
+uv run python scripts/main.py
 ```
 
 ## Docker
@@ -83,7 +83,7 @@ docker compose up
 **Run ingestion inside the container** (indexes your Notion workspace into the Docker volume):
 
 ```bash
-docker compose run --rm app uv run python ingest.py
+docker compose run --rm app uv run python scripts/ingest.py
 ```
 
 **Stop everything:**
@@ -117,9 +117,9 @@ NOTION_TOKEN=secret_xxx
 ## Ingestion
 
 ```bash
-uv run python ingest.py           # incremental — skips unchanged pages, prunes deleted ones
-uv run python ingest.py --full    # force re-embed everything
-uv run python ingest.py --status  # print chunk/page counts and exit
+uv run python scripts/ingest.py           # incremental — skips unchanged pages, prunes deleted ones
+uv run python scripts/ingest.py --full    # force re-embed everything
+uv run python scripts/ingest.py --status  # print chunk/page counts and exit
 ```
 
 Incremental mode (default) uses `last_edited_time` to skip unchanged pages and removes chunks for pages deleted from Notion. Use `--full` after changing chunking settings.
@@ -202,8 +202,8 @@ brew install redis && brew services start redis
 
 ```bash
 # Edit evals/queries.json with your test queries, then:
-uv run python eval.py           # run queries and rate answers interactively
-uv run python eval.py --report  # print pass-rate summary from saved results
+uv run python scripts/eval.py           # run queries and rate answers interactively
+uv run python scripts/eval.py --report  # print pass-rate summary from saved results
 ```
 
 Results are saved to `evals/results.jsonl`.
@@ -212,16 +212,15 @@ Results are saved to `evals/results.jsonl`.
 
 ```mermaid
 flowchart TD
-  %% ───────────────────────── Online query path ─────────────────────────
   subgraph Online["Online: answer a user query"]
-    UI["Client/UI\n`app.py` (Streamlit) or your code"] --> Q["`PipelineCoordinator.query()`"]
-    Q -->|cache hit| RC["Redis SemanticCache\n(< 5 ms)"]
+    UI["Client / UI\napp.py or your code"] --> Q["PipelineCoordinator.query()"]
+    Q -->|cache hit| RC["Redis SemanticCache\nless than 5 ms"]
     RC --> A
-    Q -->|cache miss| H["`HybridRetriever` (RRF merge)"]
-    H -->|vector| V["ChromaDB `chroma_db/`"]
-    H -->|keyword| K["BM25 `bm25_index/`"]
-    H --> R["`CrossEncoderReranker`"]
-    R --> S["`Synthesizer`\nGroqLLM · OllamaLLM · AzureOpenAILLM"]
+    Q -->|cache miss| H["HybridRetriever\nRRF merge"]
+    H -->|vector| V["ChromaDB\nchroma_db/"]
+    H -->|keyword| K["BM25\nbm25_index/"]
+    H --> R["CrossEncoderReranker"]
+    R --> S["Synthesizer\nGroq / Ollama / Azure OpenAI"]
     S -->|store result| RC
     S --> A["Final answer + sources"]
     A --> UI
@@ -229,20 +228,19 @@ flowchart TD
     W --> R
   end
 
-  %% ───────────────────────── Offline/ops workflows ─────────────────────
   subgraph Offline["Offline: ingest, eval, feedback loop"]
-    N["Notion workspace"] --> I["Ingest\n`scripts/ingest.py` → `NotionIngester`"]
-    I --> C["Chunk + embed (Ollama)"]
+    N["Notion workspace"] --> I["NotionIngester\ningest.py"]
+    I --> C["Chunk + embed\nOllama"]
     C --> V
     C --> K
 
-    E["Eval\n`scripts/eval.py` → `agentic_rag.evaluation.Evaluator`"] --> QF["`evals/queries.json`"]
-    E --> RF["writes `evals/results.jsonl`"]
+    E["Evaluator\neval.py"] --> QF["evals/queries.json"]
+    E --> RF["evals/results.jsonl"]
 
-    FB["Feedback (in `app.py`)"] --> ST["`agentic_rag.feedback.store` (`feedback.db`)"]
-    ST --> J["Judge failures\n`agentic_rag.feedback.judge`"]
-    ST --> O["Optimize\n`agentic_rag.feedback.optimizer`"]
-    O --> CFG["updates `config/default.yaml`\n+ writes `feedback_config.json`"]
+    FB["Feedback\napp.py"] --> ST["feedback.store\nfeedback.db"]
+    ST --> J["feedback.judge\nfailure classifier"]
+    ST --> O["feedback.optimizer"]
+    O --> CFG["config/default.yaml\nfeedback_config.json"]
   end
 ```
 
@@ -269,7 +267,13 @@ repo/
 ├── app.py             # Streamlit UI (query + feedback + background ingest)
 ├── scripts/
 │   ├── ingest.py      # CLI wrapper for NotionIngester
-│   └── eval.py        # CLI wrapper for Evaluator
+│   ├── eval.py        # CLI wrapper for Evaluator
+│   └── main.py        # non-UI query entrypoint
+├── data/
+│   ├── chroma_db/         # ChromaDB vector index (generated)
+│   ├── bm25_index/        # BM25 index (generated)
+│   ├── feedback_config.json  # few-shot examples (auto-written by optimizer)
+│   └── feedback.db        # SQLite feedback store (gitignored)
 ├── evals/
 │   ├── queries.json   # eval inputs
 │   └── results.jsonl  # eval outputs (generated)
