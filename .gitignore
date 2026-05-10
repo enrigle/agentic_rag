@@ -16,6 +16,9 @@ wheels/
 # claude
 .claude/
 
+# docs
+docs/
+
 # secrets
 .env
 
