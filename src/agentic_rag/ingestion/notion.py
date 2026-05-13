@@ -70,7 +70,7 @@ class NotionIngester(BaseIngester):
         notion = AsyncClient(auth=token)
         # NOTE: ollama.AsyncClient used directly here only for image captioning
         # because BaseLLM.embed() does not support vision/multimodal inputs.
-        ollama_client = ollama.AsyncClient()
+        ollama_client = ollama.AsyncClient(host=self._config.llm.base_url)
 
         logger.info("Fetching all pages from Notion...")
         pages: list[dict[str, Any]] = await async_collect_paginated_api(

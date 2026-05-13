@@ -14,13 +14,12 @@ from langgraph.graph import StateGraph, START, END
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.checkpoint.memory import MemorySaver
 
+from agentic_rag.config import load_config
 from agentic_rag.observability.langfuse import get_client as _lf_client, observation as _lf_obs
 from agentic_rag.utils.errors import ErrorHandler
 
 logger = logging.getLogger(__name__)
 _errors = ErrorHandler(logger)
-
-BM25_PATH = "./bm25_index"
 
 
 class AgentState(TypedDict):
@@ -60,19 +59,16 @@ class AgenticRAGSystem:
     RAG_CONFIDENCE_THRESHOLD = 0.025  # min RRF score to skip web fallback (max ~0.033)
     MEMORY_MAX_MESSAGES = 12  # rolling window (user+assistant messages)
 
-    def __init__(
-        self,
-        model: str = "llama3.2",
-        max_tool_calls: int = 5,
-        chroma_path: str = "./chroma_db",
-        rag_confidence_threshold: float = 0.030,
-    ) -> None:
-        self.model = model
-        self.max_tool_calls = max_tool_calls
+    def __init__(self, rag_confidence_threshold: float = 0.030) -> None:
+        cfg = load_config()
+        self.model = cfg.llm.model
+        self.embed_model = cfg.llm.embed_model
+        self.ollama_base_url = cfg.llm.base_url
+        self.max_tool_calls = cfg.max_tool_calls
         self.rag_confidence_threshold = rag_confidence_threshold
-        self.embed_model = "nomic-embed-text"
-        self.chroma = chromadb.PersistentClient(path=chroma_path)
-        self.collection = self.chroma.get_or_create_collection("notion_kb")
+        self.chroma = chromadb.PersistentClient(path=cfg.chroma_path)
+        self.collection = self.chroma.get_or_create_collection(cfg.collection_name)
+        self.bm25_path = cfg.bm25_path
         self.bm25_retriever: bm25s.BM25 | None = None
         self.bm25_ids: list[str] = []
         self._chat_memory: dict[str, list[dict[str, str]]] = {}
@@ -101,7 +97,7 @@ class AgenticRAGSystem:
         return "\n".join(lines)
 
     def _load_bm25(self) -> None:
-        bm25_path = Path(BM25_PATH)
+        bm25_path = Path(self.bm25_path)
         id_map_path = bm25_path / "id_map.json"
         if not bm25_path.exists() or not id_map_path.exists():
             logger.warning(
@@ -120,7 +116,7 @@ class AgenticRAGSystem:
     async def _invoke_ollama(self, prompt: str) -> str:
         """Call local Ollama daemon asynchronously."""
         with _lf_obs("ollama.chat", as_type="generation", input=prompt, model=self.model):
-            response = await ollama.AsyncClient().chat(
+            response = await ollama.AsyncClient(host=self.ollama_base_url).chat(
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
             )
@@ -139,7 +135,7 @@ class AgenticRAGSystem:
     async def _embed_ollama(self, text: str) -> list[float]:
         """Embed text using local Ollama daemon asynchronously."""
         with _lf_obs("ollama.embed", as_type="embedding", input=text, model=self.embed_model):
-            embed_resp = await ollama.AsyncClient().embed(
+            embed_resp = await ollama.AsyncClient(host=self.ollama_base_url).embed(
                 model=self.embed_model, input=text
             )
             vector: list[float] = embed_resp["embeddings"][0]
