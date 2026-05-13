@@ -31,14 +31,9 @@ from PIL import Image
 from notion_client import AsyncClient
 from notion_client.helpers import async_collect_paginated_api
 
-logger = logging.getLogger(__name__)
+from agentic_rag.config import load_config
 
-CHROMA_PATH = "./chroma_db"
-BM25_PATH = "./bm25_index"
-COLLECTION_NAME = "notion_kb"
-EMBED_MODEL = "nomic-embed-text"
-CHUNK_SIZE = 800
-CHUNK_OVERLAP = 100
+logger = logging.getLogger(__name__)
 
 # Block types that contain rich_text content worth indexing
 RICH_TEXT_BLOCK_TYPES = {
@@ -82,8 +77,8 @@ def _emit_chunk(chunks: list[str], heading: str, paras: list[str]) -> None:
 
 def _chunk_text(
     blocks: list[dict[str, str]],
-    size: int = CHUNK_SIZE,
-    overlap: int = CHUNK_OVERLAP,
+    size: int = 800,
+    overlap: int = 100,
 ) -> list[str]:
     """Paragraph-aware chunking that prepends the last seen heading to each chunk.
 
@@ -236,7 +231,7 @@ async def _fetch_text_from_blocks(
     return typed_lines
 
 
-def _rebuild_bm25(collection: chromadb.Collection) -> None:
+def _rebuild_bm25(collection: chromadb.Collection, bm25_path: str) -> None:
     """Rebuild BM25 index from all documents in the collection."""
     all_docs = collection.get(include=["documents"])
     ids: list[str] = all_docs["ids"] or []
@@ -247,9 +242,9 @@ def _rebuild_bm25(collection: chromadb.Collection) -> None:
     tokenized = bm25s.tokenize(documents, show_progress=False)
     retriever = bm25s.BM25()
     retriever.index(tokenized, show_progress=False)
-    Path(BM25_PATH).mkdir(exist_ok=True)
-    retriever.save(BM25_PATH)
-    (Path(BM25_PATH) / "id_map.json").write_text(json.dumps(ids))
+    Path(bm25_path).mkdir(exist_ok=True)
+    retriever.save(bm25_path)
+    (Path(bm25_path) / "id_map.json").write_text(json.dumps(ids))
     logger.info("BM25 index saved: %d documents", len(documents))
 
 
@@ -259,9 +254,10 @@ async def ingest(args: argparse.Namespace) -> None:
         logger.error("NOTION_TOKEN env var is not set")
         sys.exit(1)
 
-    chroma = chromadb.PersistentClient(path=CHROMA_PATH)
+    cfg = load_config()
+    chroma = chromadb.PersistentClient(path=cfg.chroma_path)
     collection = chroma.get_or_create_collection(
-        name=COLLECTION_NAME,
+        name=cfg.collection_name,
         metadata={"hnsw:space": "cosine"},
     )
 
@@ -280,7 +276,7 @@ async def ingest(args: argparse.Namespace) -> None:
         return
 
     notion = AsyncClient(auth=token)
-    ollama_client = ollama.AsyncClient()
+    ollama_client = ollama.AsyncClient(host=cfg.llm.base_url)
 
     logger.info("Fetching all pages from Notion...")
     pages: list[dict[str, Any]] = await async_collect_paginated_api(
@@ -331,7 +327,7 @@ async def ingest(args: argparse.Namespace) -> None:
         if not blocks:
             logger.debug("Page '%s' produced no indexable text — skipping", title)
             continue
-        chunks = _chunk_text(blocks)
+        chunks = _chunk_text(blocks, size=cfg.ingestion.chunk_size, overlap=cfg.ingestion.chunk_overlap)
 
         # Embed and upsert each chunk
         ids: list[str] = []
@@ -341,7 +337,7 @@ async def ingest(args: argparse.Namespace) -> None:
 
         for i, chunk in enumerate(chunks):
             try:
-                embed_resp = await ollama_client.embed(model=EMBED_MODEL, input=chunk)
+                embed_resp = await ollama_client.embed(model=cfg.llm.embed_model, input=chunk)
                 vector: list[float] = embed_resp["embeddings"][0]
             except Exception as exc:
                 logger.warning(
@@ -371,9 +367,9 @@ async def ingest(args: argparse.Namespace) -> None:
             total_chunks += len(ids)
             logger.info("Indexed '%s': %d chunk(s)", title, len(ids))
 
-    _rebuild_bm25(collection)
+    _rebuild_bm25(collection, cfg.bm25_path)
     print(
-        f"Done. Indexed {len(pages)} pages, {total_chunks} chunks into ChromaDB at {CHROMA_PATH!r}."
+        f"Done. Indexed {len(pages)} pages, {total_chunks} chunks into ChromaDB at {cfg.chroma_path!r}."
     )
 
 
