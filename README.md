@@ -1,36 +1,20 @@
 # Agentic RAG
 
-## Langfuse (optional tracing + evals)
-
-This repo has optional Langfuse tracing for LangGraph runs + Ollama calls. When enabled:
-
-- `main.AgenticRAGSystem.query()` returns a `trace_id`
-- `eval.py` logs your `[y/n]` rating back to Langfuse as a `human_rating` score
-
-```bash
-uv add langfuse
-export LANGFUSE_PUBLIC_KEY=...
-export LANGFUSE_SECRET_KEY=...
-export LANGFUSE_HOST=...   # optional (cloud or self-hosted)
-```
-
-## Conversation memory (follow-ups)
-
-To answer follow-up questions, the app keeps a rolling in-memory chat history per `thread_id` and uses it as extra context for retrieval + synthesis. Pass a stable `thread_id` when calling `AgenticRAGSystem.query()`. The Streamlit UI automatically generates a per-session `thread_id`.
-
 Local agentic RAG system using Ollama (llama3.2) and a Notion knowledge base. Optionally uses Groq or Azure OpenAI for fast cloud synthesis and Redis for semantic caching.
 
 ## Prerequisites
 
 - **Python 3.12+**
 - **[uv](https://docs.astral.sh/uv/getting-started/installation/)**
-- **[Ollama](https://ollama.com)**
+- **[Ollama](https://ollama.com)** — runs on your host in both local and Docker setups
 - **[Tesseract](https://github.com/tesseract-ocr/tesseract)** — for OCR on image blocks (`brew install tesseract` on macOS)
 - **Groq** *(optional)* — cloud LLM for fast synthesis; set `GROQ_API_KEY` in `.env`; falls back to Ollama if absent
 - **Azure OpenAI** *(optional)* — alternative cloud LLM; set `AZURE_OPENAI_API_KEY` + endpoint in `.env`
-- **Redis** *(optional)* — semantic cache; cache hits return in < 5 ms (`brew install redis && brew services start redis`)
+- **Redis** *(optional)* — semantic cache; cache hits return in < 5 ms
 
-## Quickstart
+---
+
+## Running locally (no Docker)
 
 ```bash
 # 1. Install dependencies
@@ -44,19 +28,36 @@ ollama pull llava          # for image captioning in Notion pages
 # 3. Start Ollama (keep running in a separate terminal)
 ollama serve
 
-# 4. Set your Notion token (or add to a .env file)
-export NOTION_TOKEN=secret_xxx
+# 4. Set your Notion token
+export NOTION_TOKEN=secret_xxx   # or add to .env
 
 # 5. Index your Notion workspace
 uv run python scripts/ingest.py
 
-# 6. Run a query
+# 6. Run a query (CLI)
 uv run python scripts/main.py
+
+# 7. Or launch the Streamlit UI
+uv run streamlit run app.py      # opens http://localhost:8501
 ```
 
-## Docker
+### Redis (optional, local)
 
-Runs the Streamlit app and Redis in containers. Ollama stays on your host machine so it keeps GPU/Metal access.
+```bash
+brew install redis && brew services start redis   # macOS
+# Redis will be available at redis://localhost:6379 (default in config/default.yaml)
+```
+
+---
+
+## Running with Docker
+
+Docker runs the **Streamlit app** and **Redis** in containers. **Ollama always runs on your host** so it keeps GPU/Metal access.
+
+**How networking works:**
+- Inside the container, the app reaches your host Ollama via `host.docker.internal:11434` (configured in `config/docker.yaml`).
+- `docker-compose.yml` adds `host.docker.internal` automatically — this works on macOS, Windows, and Linux without any extra setup.
+- Redis runs inside a container; the app connects to it via Docker's internal network.
 
 **Prerequisites:**
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/) installed and running
@@ -71,8 +72,10 @@ cp .env.example .env
 docker compose up --build
 
 # 3. Open the app
-open http://localhost:8501
+open http://localhost:8502
 ```
+
+> **Why 8502?** Streamlit listens on port 8501 inside the container, but Docker maps it to **8502** on your host (`8502:8501` in `docker-compose.yml`) to avoid conflicting with a local Streamlit instance you might already have running.
 
 On subsequent starts (no code changes), skip `--build`:
 
@@ -98,18 +101,14 @@ Your ChromaDB and BM25 indexes are stored in `./data/` on your machine and survi
 
 ## UI (Streamlit)
 
-```bash
-uv run streamlit run app.py
-```
-
 The sidebar shows live **service health** (Ollama, Redis, Groq, ChromaDB) and a **Chunking** tool to paste text and preview chunk counts for different `ingestion.chunk_size` / `ingestion.chunk_overlap` values.
 
-### Notion setup (step 4)
+### Notion setup
 
 1. Go to [notion.so/my-integrations](https://www.notion.so/my-integrations) → create an **Internal Integration** → copy the secret.
 2. For each page to index: open the page → **"..."** → **"Connect to"** → select your integration.
 
-You can also store the token in a `.env` file at the project root:
+Store the token in `.env` at the project root:
 ```
 NOTION_TOKEN=secret_xxx
 ```
@@ -124,24 +123,24 @@ uv run python scripts/ingest.py --status  # print chunk/page counts and exit
 
 Incremental mode (default) uses `last_edited_time` to skip unchanged pages and removes chunks for pages deleted from Notion. Use `--full` after changing chunking settings.
 
-Ingestion builds both the ChromaDB vector index and a BM25 index (`./bm25_index/`). Queries use both via Reciprocal Rank Fusion — BM25 catches exact keyword matches that vector search can miss, and vector search handles semantic similarity.
+Ingestion builds both the ChromaDB vector index and a BM25 index (`./data/bm25_index/`). Queries use both via Reciprocal Rank Fusion — BM25 catches exact keyword matches that vector search can miss, and vector search handles semantic similarity.
 
 Image blocks in Notion pages are processed with OCR (Tesseract) and optionally captioned via `llava`.
 
 ## Configuration
 
-Settings live in `config/default.yaml` and are loaded into typed dataclasses at startup:
+Settings live in `config/default.yaml` (local) and `config/docker.yaml` (Docker) and are loaded into typed dataclasses at startup:
 
 ```yaml
-chroma_path: ./chroma_db
-bm25_path: ./bm25_index
+chroma_path: ./data/chroma_db
+bm25_path: ./data/bm25_index
 collection_name: notion_kb
 max_tool_calls: 5
 
 llm:
   model: llama3.2
   embed_model: nomic-embed-text
-  base_url: http://localhost:11434
+  base_url: http://localhost:11434    # docker.yaml uses http://host.docker.internal:11434
 
 retriever:
   min_similarity: 0.50        # cosine similarity cutoff for vector candidates
@@ -171,7 +170,7 @@ azure_openai:
 
 # Optional: Redis semantic cache
 redis:
-  url: "redis://localhost:6379"
+  url: "redis://localhost:6379"     # docker.yaml uses redis://redis:6379
   ttl_seconds: 3600
   similarity_threshold: 0.95  # cosine similarity required for a cache hit
 ```
@@ -192,12 +191,6 @@ AZURE_OPENAI_API_KEY=...
 AZURE_OPENAI_ENDPOINT=https://<your-resource>.openai.azure.com/
 ```
 
-### Redis setup (local dev)
-
-```bash
-brew install redis && brew services start redis
-```
-
 ## Eval
 
 ```bash
@@ -208,6 +201,24 @@ uv run python scripts/eval.py --report  # print pass-rate summary from saved res
 
 Results are saved to `evals/results.jsonl`.
 
+## Optional: Langfuse tracing
+
+This repo has optional Langfuse tracing for LangGraph runs + Ollama calls. When enabled:
+
+- `main.AgenticRAGSystem.query()` returns a `trace_id`
+- `eval.py` logs your `[y/n]` rating back to Langfuse as a `human_rating` score
+
+```bash
+uv add langfuse
+export LANGFUSE_PUBLIC_KEY=...
+export LANGFUSE_SECRET_KEY=...
+export LANGFUSE_HOST=...   # optional (cloud or self-hosted)
+```
+
+## Conversation memory (follow-ups)
+
+To answer follow-up questions, the app keeps a rolling in-memory chat history per `thread_id` and uses it as extra context for retrieval + synthesis. Pass a stable `thread_id` when calling `AgenticRAGSystem.query()`. The Streamlit UI automatically generates a per-session `thread_id`.
+
 ## Architecture
 
 ```mermaid
@@ -217,8 +228,8 @@ flowchart TD
     Q -->|cache hit| RC["Redis SemanticCache\nless than 5 ms"]
     RC --> A
     Q -->|cache miss| H["HybridRetriever\nRRF merge"]
-    H -->|vector| V["ChromaDB\nchroma_db/"]
-    H -->|keyword| K["BM25\nbm25_index/"]
+    H -->|vector| V["ChromaDB\ndata/chroma_db/"]
+    H -->|keyword| K["BM25\ndata/bm25_index/"]
     H --> R["CrossEncoderReranker"]
     R --> S["Synthesizer\nGroq / Ollama / Azure OpenAI"]
     S -->|store result| RC
@@ -258,7 +269,7 @@ src/agentic_rag/
 ├── health.py          # startup dependency checks
 ├── feedback/          # Store + judge + optimizer (feedback loop)
 ├── observability/     # Langfuse tracing/scoring
-├── evaluation/        # Evaluator logic (reads/writes `evals/`)
+├── evaluation/        # Evaluator logic (reads/writes evals/)
 └── utils/             # shared helpers (errors, etc.)
 ```
 
@@ -269,6 +280,9 @@ repo/
 │   ├── ingest.py      # CLI wrapper for NotionIngester
 │   ├── eval.py        # CLI wrapper for Evaluator
 │   └── main.py        # non-UI query entrypoint
+├── config/
+│   ├── default.yaml   # local config
+│   └── docker.yaml    # Docker config (Ollama + Redis URLs differ)
 ├── data/
 │   ├── chroma_db/         # ChromaDB vector index (generated)
 │   ├── bm25_index/        # BM25 index (generated)
