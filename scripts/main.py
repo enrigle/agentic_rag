@@ -8,13 +8,13 @@ from typing import Any, Literal, TypedDict
 
 import bm25s
 import chromadb
-import ollama
 from tavily import AsyncTavilyClient
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.checkpoint.memory import MemorySaver
 
-from agentic_rag.config import load_config
+from agentic_rag.config import RAGConfig, load_config
+from agentic_rag.llm.base import BaseLLM
 from agentic_rag.observability.langfuse import get_client as _lf_client, observation as _lf_obs
 from agentic_rag.utils.errors import ErrorHandler
 
@@ -52,8 +52,29 @@ def _rrf_merge(
     return merged, scores
 
 
+def _build_llms(cfg: RAGConfig) -> tuple[BaseLLM, BaseLLM]:
+    """Return (embed_llm, synth_llm) based on config."""
+    from agentic_rag.llm.ollama import OllamaLLM
+    from agentic_rag.llm.openai_compat import AzureOpenAILLM, GroqLLM
+    from agentic_rag.llm.sentence_transformers_llm import SentenceTransformersLLM
+
+    embed_llm: BaseLLM = (
+        SentenceTransformersLLM(cfg.llm.embed_model)
+        if cfg.embed_backend == "sentence_transformers"
+        else OllamaLLM(cfg.llm)
+    )
+    synth_llm: BaseLLM
+    if cfg.groq.is_configured():
+        synth_llm = GroqLLM(cfg.groq)
+    elif cfg.azure_openai.is_configured():
+        synth_llm = AzureOpenAILLM(cfg.azure_openai)
+    else:
+        synth_llm = OllamaLLM(cfg.llm)
+    return embed_llm, synth_llm
+
+
 class AgenticRAGSystem:
-    """Production agentic RAG with LangGraph orchestration and Ollama."""
+    """Production agentic RAG with LangGraph orchestration."""
 
     MIN_SIMILARITY = 0.35       # cosine similarity threshold for vector candidates
     RAG_CONFIDENCE_THRESHOLD = 0.025  # min RRF score to skip web fallback (max ~0.033)
@@ -61,9 +82,7 @@ class AgenticRAGSystem:
 
     def __init__(self, rag_confidence_threshold: float = 0.030) -> None:
         cfg = load_config()
-        self.model = cfg.llm.model
-        self.embed_model = cfg.llm.embed_model
-        self.ollama_base_url = cfg.llm.base_url
+        self._embed_llm, self._synth_llm = _build_llms(cfg)
         self.max_tool_calls = cfg.max_tool_calls
         self.rag_confidence_threshold = rag_confidence_threshold
         self.chroma = chromadb.PersistentClient(path=cfg.chroma_path)
@@ -113,32 +132,14 @@ class AgenticRAGSystem:
                 "Failed to load BM25 index: %s — vector-only search active", exc
             )
 
-    async def _invoke_ollama(self, prompt: str) -> str:
-        """Call local Ollama daemon asynchronously."""
-        with _lf_obs("ollama.chat", as_type="generation", input=prompt, model=self.model):
-            response = await ollama.AsyncClient(host=self.ollama_base_url).chat(
-                model=self.model,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            content: str = response.message.content  # type: ignore[assignment]
-            lf = _lf_client()
-            if lf and content:
-                lf.update_current_generation(
-                    output=content,
-                    usage_details={
-                        "input": getattr(response, "prompt_eval_count", None) or 0,
-                        "output": getattr(response, "eval_count", None) or 0,
-                    },
-                )
+    async def _invoke_synth(self, prompt: str) -> str:
+        with _lf_obs("synth.chat", as_type="generation", input=prompt):
+            content = await self._synth_llm.chat(prompt)
         return content
 
-    async def _embed_ollama(self, text: str) -> list[float]:
-        """Embed text using local Ollama daemon asynchronously."""
-        with _lf_obs("ollama.embed", as_type="embedding", input=text, model=self.embed_model):
-            embed_resp = await ollama.AsyncClient(host=self.ollama_base_url).embed(
-                model=self.embed_model, input=text
-            )
-            vector: list[float] = embed_resp["embeddings"][0]
+    async def _embed(self, text: str) -> list[float]:
+        with _lf_obs("embed", as_type="embedding", input=text):
+            vector = await self._embed_llm.embed(text)
         return vector
 
     def _build_graph(self) -> CompiledStateGraph:
@@ -196,7 +197,7 @@ class AgenticRAGSystem:
         )
 
         try:
-            text = await self._invoke_ollama(prompt)
+            text = await self._invoke_synth(prompt)
             start = text.find("{")
             end = text.rfind("}") + 1
             parsed = json.loads(text[start:end])
@@ -253,7 +254,7 @@ class AgenticRAGSystem:
 
         try:
             # --- Vector search ---
-            query_vec = await self._embed_ollama(state["query"])
+            query_vec = await self._embed(state["query"])
 
             loop = asyncio.get_running_loop()
             vector_raw: dict[str, Any] = await loop.run_in_executor(
@@ -498,7 +499,7 @@ class AgenticRAGSystem:
         )
 
         try:
-            answer = await self._invoke_ollama(prompt)
+            answer = await self._invoke_synth(prompt)
             return {
                 **state,
                 "final_answer": answer,

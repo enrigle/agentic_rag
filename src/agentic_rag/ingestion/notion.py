@@ -68,9 +68,13 @@ class NotionIngester(BaseIngester):
             raise RuntimeError("NOTION_TOKEN environment variable is not set")
 
         notion = AsyncClient(auth=token)
-        # NOTE: ollama.AsyncClient used directly here only for image captioning
-        # because BaseLLM.embed() does not support vision/multimodal inputs.
-        ollama_client = ollama.AsyncClient(host=self._config.llm.base_url)
+        # ollama.AsyncClient is only needed for vision/image captioning.
+        # Skip creation when vision_model is empty (e.g. Azure deployment).
+        ollama_client: ollama.AsyncClient | None = (
+            ollama.AsyncClient(host=self._config.llm.base_url)
+            if self._config.ingestion.vision_model
+            else None
+        )
 
         logger.info("Fetching all pages from Notion...")
         pages: list[dict[str, Any]] = await async_collect_paginated_api(
@@ -224,12 +228,14 @@ class NotionIngester(BaseIngester):
         (bm25_path / "id_map.json").write_text(json.dumps(ids))
         logger.info("BM25 index saved: %d documents", len(documents))
 
-    async def _caption_image(self, ollama_client: ollama.AsyncClient, url: str) -> str:
+    async def _caption_image(self, ollama_client: ollama.AsyncClient | None, url: str) -> str:
         """Download image and return a text caption via the configured vision model.
 
         NOTE: Uses ollama.AsyncClient directly because BaseLLM.embed() does not
         support vision/multimodal inputs.
         """
+        if ollama_client is None:
+            return ""
         try:
             loop = asyncio.get_running_loop()
 
@@ -256,7 +262,7 @@ class NotionIngester(BaseIngester):
     async def _fetch_text_from_blocks(
         self,
         notion: AsyncClient,
-        ollama_client: ollama.AsyncClient,
+        ollama_client: ollama.AsyncClient | None,
         block_id: str,
         depth: int = 0,
         max_depth: int = 10,

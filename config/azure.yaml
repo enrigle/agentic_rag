@@ -2,12 +2,12 @@ chroma_path: /app/data/chroma_db
 bm25_path: /app/data/bm25_index
 collection_name: notion_kb
 max_tool_calls: 5
-embed_backend: ollama
+embed_backend: sentence_transformers
 
 llm:
-  model: llama3.2
-  embed_model: nomic-embed-text
-  base_url: http://host.docker.internal:11434
+  model: ""
+  embed_model: "BAAI/bge-small-en-v1.5"
+  base_url: ""
 
 retriever:
   min_similarity: 0.50
@@ -23,15 +23,15 @@ ingestion:
   chunk_overlap: 100
   vision_model: ""
 
+azure_openai:
+  endpoint: "https://YOUR-RESOURCE.openai.azure.com/"
+  deployment: "gpt-4o-mini"
+  api_version: "2024-11-01-preview"
+
 groq:
   model: "llama-3.1-8b-instant"
 
-azure_openai:
-  endpoint: ""
-  deployment: "gpt-4o-mini"
-  api_version: "2024-02-01"
-
 redis:
-  url: "redis://redis:6379"
+  url: "rediss://YOUR-CACHE.redis.cache.windows.net:6380"
   ttl_seconds: 3600
   similarity_threshold: 0.95

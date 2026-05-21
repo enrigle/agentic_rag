@@ -5,7 +5,8 @@ from __future__ import annotations
 import json
 import logging
 
-import ollama
+from agentic_rag.config import load_config
+from agentic_rag.llm.base import BaseLLM
 
 logger = logging.getLogger(__name__)
 
@@ -27,14 +28,24 @@ Pick exactly one failure category:
 Respond with JSON only, no other text: {{"category": "..."}}"""
 
 
+def _build_synth_llm() -> BaseLLM:
+    from agentic_rag.llm.ollama import OllamaLLM
+    from agentic_rag.llm.openai_compat import AzureOpenAILLM, GroqLLM
+
+    cfg = load_config()
+    if cfg.groq.is_configured():
+        return GroqLLM(cfg.groq)
+    if cfg.azure_openai.is_configured():
+        return AzureOpenAILLM(cfg.azure_openai)
+    return OllamaLLM(cfg.llm)
+
+
 async def classify_failure(
     query: str,
     answer: str,
     sources: list[dict],
-    model: str = "llama3.2",
-    base_url: str = "http://localhost:11434",
 ) -> str:
-    """Classify a thumbs-down response. Returns one of the three category strings or 'unknown'."""
+    """Classify a thumbs-down response. Returns one of three categories or 'unknown'."""
     sources_block = (
         "\n".join(
             f'  {i + 1}. "{s.get("title", "")}" — "{str(s.get("content", ""))[:350]}..."'
@@ -50,12 +61,8 @@ async def classify_failure(
     )
 
     try:
-        async with ollama.AsyncClient(host=base_url) as client:
-            response = await client.chat(
-                model=model,
-                messages=[{"role": "user", "content": prompt}],
-            )
-        text: str = response["message"]["content"]
+        llm = _build_synth_llm()
+        text = await llm.chat(prompt)
         start = text.find("{")
         end = text.rfind("}") + 1
         if start == -1 or end == 0:

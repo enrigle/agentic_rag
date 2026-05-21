@@ -76,6 +76,7 @@ class RAGConfig:
     bm25_path: str = "./bm25_index"
     collection_name: str = "notion_kb"
     max_tool_calls: int = 5
+    embed_backend: str = "ollama"  # "ollama" | "sentence_transformers"
     llm: LLMConfig = field(default_factory=LLMConfig)
     retriever: RetrieverConfig = field(default_factory=RetrieverConfig)
     ingestion: IngestionConfig = field(default_factory=IngestionConfig)
@@ -129,7 +130,9 @@ def load_config(path: Path | None = None) -> RAGConfig:
     azure_openai_cfg = _parse_sub(AzureOpenAIConfig, raw.get("azure_openai") or {})
     redis_cfg = _parse_sub(RedisConfig, raw.get("redis") or {})
 
-    top_level_keys = {"chroma_path", "bm25_path", "collection_name", "max_tool_calls"}
+    top_level_keys = {
+        "chroma_path", "bm25_path", "collection_name", "max_tool_calls", "embed_backend"
+    }
     top_level = {k: v for k, v in raw.items() if k in top_level_keys}
 
     try:
