@@ -2,6 +2,7 @@ chroma_path: /app/data/chroma_db
 bm25_path: /app/data/bm25_index
 collection_name: notion_kb
 max_tool_calls: 5
+embed_backend: ollama
 
 llm:
   model: llama3.2

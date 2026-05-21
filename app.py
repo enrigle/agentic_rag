@@ -60,6 +60,7 @@ def _service_statuses() -> list:
         ollama_url=cfg.llm.base_url,
         redis_url=cfg.redis.url,
         chroma_path=cfg.chroma_path,
+        embed_backend=cfg.embed_backend,
     ))
 
 
@@ -254,14 +255,11 @@ if last_result and not st.session_state.rated:
             )
             entry_id = save(entry)
             with st.spinner("Analyzing failure..."):
-                _cfg = load_config()
                 category = asyncio.run(
                     classify_failure(
                         query=last_query,
                         answer=last_result["answer"],
                         sources=sources_for_store,
-                        model=_cfg.llm.model,
-                        base_url=_cfg.llm.base_url,
                     )
                 )
             update_category(entry_id, category)

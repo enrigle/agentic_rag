@@ -25,13 +25,13 @@ import io
 
 import bm25s
 import chromadb
-import ollama
 import pytesseract
 from PIL import Image
 from notion_client import AsyncClient
 from notion_client.helpers import async_collect_paginated_api
 
 from agentic_rag.config import load_config
+from agentic_rag.llm.base import BaseLLM
 
 logger = logging.getLogger(__name__)
 
@@ -276,7 +276,14 @@ async def ingest(args: argparse.Namespace) -> None:
         return
 
     notion = AsyncClient(auth=token)
-    ollama_client = ollama.AsyncClient(host=cfg.llm.base_url)
+
+    embed_llm: BaseLLM
+    if cfg.embed_backend == "sentence_transformers":
+        from agentic_rag.llm.sentence_transformers_llm import SentenceTransformersLLM
+        embed_llm = SentenceTransformersLLM(cfg.llm.embed_model)
+    else:
+        from agentic_rag.llm.ollama import OllamaLLM
+        embed_llm = OllamaLLM(cfg.llm)
 
     logger.info("Fetching all pages from Notion...")
     pages: list[dict[str, Any]] = await async_collect_paginated_api(
@@ -337,8 +344,7 @@ async def ingest(args: argparse.Namespace) -> None:
 
         for i, chunk in enumerate(chunks):
             try:
-                embed_resp = await ollama_client.embed(model=cfg.llm.embed_model, input=chunk)
-                vector: list[float] = embed_resp["embeddings"][0]
+                vector: list[float] = await embed_llm.embed(chunk)
             except Exception as exc:
                 logger.warning(
                     "Embedding failed for chunk %d of '%s': %s", i, title, exc

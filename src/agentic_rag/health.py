@@ -38,7 +38,7 @@ async def _check_redis(url: str) -> ServiceStatus:
 def _check_groq() -> ServiceStatus:
     if os.environ.get("GROQ_API_KEY"):
         return ServiceStatus("Groq", True)
-    return ServiceStatus("Groq", False, "GROQ_API_KEY not set — falling back to Ollama")
+    return ServiceStatus("Groq", False, "GROQ_API_KEY not set — using configured LLM")
 
 
 def _check_chromadb(chroma_path: str) -> ServiceStatus:
@@ -51,9 +51,17 @@ async def run_checks(
     ollama_url: str,
     redis_url: str,
     chroma_path: str,
+    embed_backend: str = "ollama",
 ) -> list[ServiceStatus]:
-    ollama_st, redis_st = await asyncio.gather(
-        _check_ollama(ollama_url),
-        _check_redis(redis_url),
-    )
-    return [ollama_st, redis_st, _check_groq(), _check_chromadb(chroma_path)]
+    if embed_backend == "sentence_transformers":
+        embed_st: ServiceStatus = ServiceStatus(
+            "Embeddings", True, "sentence-transformers (in-process)"
+        )
+        redis_st = await _check_redis(redis_url)
+    else:
+        embed_st, redis_st = await asyncio.gather(
+            _check_ollama(ollama_url),
+            _check_redis(redis_url),
+        )
+
+    return [embed_st, redis_st, _check_groq(), _check_chromadb(chroma_path)]
