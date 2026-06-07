@@ -18,6 +18,7 @@ class ServiceStatus:
 async def _check_ollama(base_url: str) -> ServiceStatus:
     try:
         import ollama
+
         await ollama.AsyncClient(host=base_url).list()
         return ServiceStatus("Ollama", True)
     except Exception:
@@ -27,6 +28,7 @@ async def _check_ollama(base_url: str) -> ServiceStatus:
 async def _check_redis(url: str) -> ServiceStatus:
     try:
         import redis.asyncio as aioredis
+
         r = aioredis.Redis.from_url(url)
         await r.ping()
         await r.aclose()

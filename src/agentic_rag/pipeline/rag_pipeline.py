@@ -35,7 +35,9 @@ def create_pipeline(config: RAGConfig | None = None) -> PipelineCoordinator:
 
     if config.embed_backend == "sentence_transformers":
         llm: BaseLLM = SentenceTransformersLLM(config.llm.embed_model)
-        logger.info("Embeddings: SentenceTransformersLLM model=%s", config.llm.embed_model)
+        logger.info(
+            "Embeddings: SentenceTransformersLLM model=%s", config.llm.embed_model
+        )
     else:
         llm = OllamaLLM(config.llm)
         logger.info("Embeddings: OllamaLLM (model=%s)", config.llm.embed_model)
@@ -47,7 +49,9 @@ def create_pipeline(config: RAGConfig | None = None) -> PipelineCoordinator:
         logger.info("Synthesis: GroqLLM (model=%s)", config.groq.model)
     elif config.azure_openai.is_configured():
         synth_llm = AzureOpenAILLM(config.azure_openai)
-        logger.info("Synthesis: AzureOpenAILLM deployment=%s", config.azure_openai.deployment)
+        logger.info(
+            "Synthesis: AzureOpenAILLM deployment=%s", config.azure_openai.deployment
+        )
 
     cache = SemanticCache(config.redis, llm)
 

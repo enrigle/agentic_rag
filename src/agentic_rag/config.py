@@ -60,7 +60,9 @@ class AzureOpenAIConfig:
     api_version: str = "2024-02-01"
 
     def is_configured(self) -> bool:
-        return bool(self.endpoint and (self.api_key or os.environ.get("AZURE_OPENAI_API_KEY")))
+        return bool(
+            self.endpoint and (self.api_key or os.environ.get("AZURE_OPENAI_API_KEY"))
+        )
 
 
 @dataclass
@@ -131,7 +133,11 @@ def load_config(path: Path | None = None) -> RAGConfig:
     redis_cfg = _parse_sub(RedisConfig, raw.get("redis") or {})
 
     top_level_keys = {
-        "chroma_path", "bm25_path", "collection_name", "max_tool_calls", "embed_backend"
+        "chroma_path",
+        "bm25_path",
+        "collection_name",
+        "max_tool_calls",
+        "embed_backend",
     }
     top_level = {k: v for k, v in raw.items() if k in top_level_keys}
 

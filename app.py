@@ -10,6 +10,7 @@ from typing import TypedDict
 
 import streamlit as st
 from dotenv import load_dotenv
+
 load_dotenv()
 
 from agentic_rag.config import load_config
@@ -56,12 +57,14 @@ def _run_ingest() -> None:
 @st.cache_resource
 def _service_statuses() -> list:
     cfg = load_config()
-    return asyncio.run(run_checks(
-        ollama_url=cfg.llm.base_url,
-        redis_url=cfg.redis.url,
-        chroma_path=cfg.chroma_path,
-        embed_backend=cfg.embed_backend,
-    ))
+    return asyncio.run(
+        run_checks(
+            ollama_url=cfg.llm.base_url,
+            redis_url=cfg.redis.url,
+            chroma_path=cfg.chroma_path,
+            embed_backend=cfg.embed_backend,
+        )
+    )
 
 
 @st.cache_resource
@@ -158,7 +161,9 @@ with st.sidebar:
     if st.button("Optimize", disabled=optimize_disabled, help="Requires 10+ ratings"):
         with st.spinner("Optimizing..."):
             _cfg = load_config()
-            result = apply_optimization(all_entries, few_shot_max=_cfg.retriever.few_shot_max)
+            result = apply_optimization(
+                all_entries, few_shot_max=_cfg.retriever.few_shot_max
+            )
         parts = []
         if result.new_min_similarity is not None:
             parts.append(f"min_similarity → {result.new_min_similarity}")

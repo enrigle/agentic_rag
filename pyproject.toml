@@ -35,6 +35,7 @@ where = ["src"]
 [dependency-groups]
 dev = [
     "mypy>=1.10",
+    "pre-commit>=3.7",
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
     "ruff>=0.15.8",
@@ -42,6 +43,9 @@ dev = [
 
 [tool.ruff]
 exclude = ["eval.py", "ingest.py", "main.py"]
+
+[tool.ruff.lint.per-file-ignores]
+"app.py" = ["E402"]  # logging suppression must precede imports that trigger those loggers
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

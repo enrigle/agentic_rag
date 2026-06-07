@@ -65,7 +65,11 @@ class PipelineCoordinator:
                     ctx.results.extend(new_results)
                     ctx.tool_calls += 1
                     if new_results:
-                        logger.info("%s: %d results found, stopping", source.name, len(new_results))
+                        logger.info(
+                            "%s: %d results found, stopping",
+                            source.name,
+                            len(new_results),
+                        )
                         break
 
                 ctx.results = self._reranker.rerank(user_query, ctx.results)
