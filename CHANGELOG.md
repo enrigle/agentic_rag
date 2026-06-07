@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **Pre-commit hook** — ruff-format, ruff check, and pytest run automatically on every `git commit`; `pre-commit>=3.7` added to dev dependencies
+- **Source deduplication in `HybridRetriever`** — multiple chunks from the same Notion page now collapse to the best-ranked chunk, preventing duplicate sources in results
+
+### Changed
+- `[tool.ruff.lint.per-file-ignores]` added to `pyproject.toml` — suppresses E402 for `app.py` (intentional logging-before-imports pattern)
+
 ## [0.9.0] - 2026-05-09
 
 ### Added

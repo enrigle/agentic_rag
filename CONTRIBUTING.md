@@ -42,13 +42,23 @@ Data is written to `./data/` on the host (mounted volume) and persists across re
 
 ## Development
 
+After cloning, wire up the pre-commit hook once:
+
 ```bash
-ruff format . && ruff check . --fix  # lint
-mypy . --strict                       # type check
-pytest -x                             # tests
+uv run pre-commit install
 ```
 
-Run lint and type check before submitting a PR.
+This runs ruff and pytest automatically on every `git commit`. To run the checks manually at any time:
+
+```bash
+uv run pre-commit run --all-files
+```
+
+Type checking is not part of the hook and must be run separately:
+
+```bash
+mypy . --strict
+```
 
 ## Collaborating
 

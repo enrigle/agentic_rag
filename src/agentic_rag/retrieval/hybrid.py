@@ -56,24 +56,9 @@ class HybridRetriever:
         query_vec: list[float],
         query_text: str,
     ) -> list[SearchResult]:
-        """Run hybrid search and return merged results.
-
-        Executes vector search and (optionally) BM25 search, merges
-        the ranked ID lists via RRF, fetches any missing documents from
-        the vector store, and returns the final ordered result list.
-
-        Args:
-            query_vec: Pre-computed embedding for the query.
-            query_text: Raw query string for BM25 tokenisation.
-
-        Returns:
-            Up to ``config.retriever.top_n`` SearchResult objects ordered
-            by descending RRF score.
-        """
+        """Run hybrid search and return merged results."""
         cfg = self._config.retriever
 
-        # --- Vector search ---
-        # Use bm25_top_k as the vector candidate pool size too (independently tunable via config if needed)
         vector_results = await self._vector_store.search(
             query_vec, top_k=cfg.bm25_top_k
         )
@@ -87,7 +72,6 @@ class HybridRetriever:
                 dropped,
             )
 
-        # --- BM25 search ---
         bm25_ids: list[str] = []
         if self._keyword_retriever is not None:
             bm25_ids = self._keyword_retriever.search(query_text, top_k=cfg.bm25_top_k)
@@ -95,48 +79,24 @@ class HybridRetriever:
                 "HybridRetriever.search: BM25 returned %d candidates", len(bm25_ids)
             )
 
-        # No vector results means nothing in the KB cleared min_similarity — signal
-        # the coordinator to fall through to web search rather than returning
-        # BM25-only results, which have no semantic relevance guarantee.
+        # No vector results means nothing cleared min_similarity — signal coordinator
+        # to fall through to web search rather than returning BM25-only results.
         if not vector_ids:
-            logger.info("HybridRetriever.search: no vector results above min_similarity threshold")
+            logger.info(
+                "HybridRetriever.search: no vector results above min_similarity threshold"
+            )
             return []
 
-        # --- RRF merge ---
         merged_ids, rrf_scores = _rrf_merge(
             vector_ids, bm25_ids, k=cfg.rrf_k, top_n=cfg.top_n
         )
-
         if not merged_ids:
             logger.info("HybridRetriever.search: no results after RRF")
             return []
 
-        # --- Fetch data for BM25-only IDs ---
-        missing_ids = [fid for fid in merged_ids if fid not in vector_data]
-        if missing_ids:
-            fetched = await self._vector_store.fetch_by_ids(missing_ids)
-            for result in fetched:
-                vector_data[result.id] = result
-
-        # --- Assemble final results with RRF scores ---
-        final: list[SearchResult] = []
-        for fid in merged_ids:
-            if fid not in vector_data:
-                logger.warning(
-                    "HybridRetriever.search: merged ID %r not found in vector data — skipping",
-                    fid,
-                )
-                continue
-            base = vector_data[fid]
-            final.append(
-                SearchResult(
-                    id=base.id,
-                    title=base.title,
-                    source=base.source,
-                    content=base.content,
-                    score=round(rrf_scores[fid], 6),
-                )
-            )
+        await self._fill_vector_data(merged_ids, vector_data)
+        merged_ids = self._deduplicate_by_source(merged_ids, vector_data)
+        final = self._build_results(merged_ids, vector_data, rrf_scores)
 
         logger.info(
             "HybridRetriever.search: hybrid returned %d results (vector=%d, bm25=%d)",
@@ -145,3 +105,51 @@ class HybridRetriever:
             len(bm25_ids),
         )
         return final
+
+    async def _fill_vector_data(
+        self,
+        merged_ids: list[str],
+        vector_data: dict[str, SearchResult],
+    ) -> None:
+        missing = [fid for fid in merged_ids if fid not in vector_data]
+        if missing:
+            for result in await self._vector_store.fetch_by_ids(missing):
+                vector_data[result.id] = result
+
+    def _deduplicate_by_source(
+        self,
+        merged_ids: list[str],
+        vector_data: dict[str, SearchResult],
+    ) -> list[str]:
+        seen: set[str] = set()
+        deduped: list[str] = []
+        for fid in merged_ids:
+            if fid in vector_data and vector_data[fid].source not in seen:
+                seen.add(vector_data[fid].source)
+                deduped.append(fid)
+        return deduped
+
+    def _build_results(
+        self,
+        merged_ids: list[str],
+        vector_data: dict[str, SearchResult],
+        rrf_scores: dict[str, float],
+    ) -> list[SearchResult]:
+        results: list[SearchResult] = []
+        for fid in merged_ids:
+            if fid not in vector_data:
+                logger.warning(
+                    "HybridRetriever.search: merged ID %r not found — skipping", fid
+                )
+                continue
+            base = vector_data[fid]
+            results.append(
+                SearchResult(
+                    id=base.id,
+                    title=base.title,
+                    source=base.source,
+                    content=base.content,
+                    score=round(rrf_scores[fid], 6),
+                )
+            )
+        return results

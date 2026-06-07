@@ -228,7 +228,9 @@ class NotionIngester(BaseIngester):
         (bm25_path / "id_map.json").write_text(json.dumps(ids))
         logger.info("BM25 index saved: %d documents", len(documents))
 
-    async def _caption_image(self, ollama_client: ollama.AsyncClient | None, url: str) -> str:
+    async def _caption_image(
+        self, ollama_client: ollama.AsyncClient | None, url: str
+    ) -> str:
         """Download image and return a text caption via the configured vision model.
 
         NOTE: Uses ollama.AsyncClient directly because BaseLLM.embed() does not

@@ -32,7 +32,12 @@ class OpenAICompatLLM(BaseLLM):
     async def chat(self, prompt: str) -> str:
         if not prompt:
             raise ValueError("prompt must be a non-empty string")
-        logger.debug("chat() → %s model=%s prompt_len=%d", self._provider, self._model, len(prompt))
+        logger.debug(
+            "chat() → %s model=%s prompt_len=%d",
+            self._provider,
+            self._model,
+            len(prompt),
+        )
         try:
             response = await self._client.chat.completions.create(
                 model=self._model,
@@ -41,10 +46,14 @@ class OpenAICompatLLM(BaseLLM):
         except openai.APIError as exc:
             raise RuntimeError(f"{self._provider} chat failed: {exc}") from exc
         if not response.choices:
-            raise ValueError(f"{self._provider} returned no choices for model={self._model!r}")
+            raise ValueError(
+                f"{self._provider} returned no choices for model={self._model!r}"
+            )
         content = response.choices[0].message.content
         if not content:
-            raise ValueError(f"{self._provider} returned empty content for model={self._model!r}")
+            raise ValueError(
+                f"{self._provider} returned empty content for model={self._model!r}"
+            )
         logger.debug("chat() ← content_len=%d", len(content))
         return content
 

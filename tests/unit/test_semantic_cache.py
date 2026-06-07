@@ -279,7 +279,9 @@ async def test_get_disables_cache_after_redis_error() -> None:
         "agentic_rag.cache.semantic_cache.aioredis.Redis.from_url",
         return_value=mock_redis,
     ):
-        cfg = RedisConfig(url="redis://localhost:6379", ttl_seconds=60, similarity_threshold=0.9)
+        cfg = RedisConfig(
+            url="redis://localhost:6379", ttl_seconds=60, similarity_threshold=0.9
+        )
         embed_llm = MagicMock()
         embed_llm.embed = AsyncMock(return_value=[1.0, 0.0, 0.0])
         c = SemanticCache(cfg, embed_llm)
@@ -302,7 +304,9 @@ async def test_set_disables_cache_after_redis_error() -> None:
         "agentic_rag.cache.semantic_cache.aioredis.Redis.from_url",
         return_value=mock_redis,
     ):
-        cfg = RedisConfig(url="redis://localhost:6379", ttl_seconds=60, similarity_threshold=0.9)
+        cfg = RedisConfig(
+            url="redis://localhost:6379", ttl_seconds=60, similarity_threshold=0.9
+        )
         embed_llm = MagicMock()
         embed_llm.embed = AsyncMock(return_value=[1.0, 0.0, 0.0])
         c = SemanticCache(cfg, embed_llm)
