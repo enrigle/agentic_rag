@@ -4,98 +4,14 @@ Local agentic RAG system using Ollama (llama3.2) and a Notion knowledge base. Op
 
 ## Prerequisites
 
-- **Python 3.12+**
-- **[uv](https://docs.astral.sh/uv/getting-started/installation/)**
+- **Python 3.12+** and **[uv](https://docs.astral.sh/uv/getting-started/installation/)**
 - **[Ollama](https://ollama.com)** — runs on your host in both local and Docker setups
-- **[Tesseract](https://github.com/tesseract-ocr/tesseract)** — for OCR on image blocks (`brew install tesseract` on macOS)
-- **Groq** *(optional)* — cloud LLM for fast synthesis; set `GROQ_API_KEY` in `.env`; falls back to Ollama if absent
+- **[Tesseract](https://github.com/tesseract-ocr/tesseract)** — OCR for image blocks (`brew install tesseract` on macOS)
+- **Groq** *(optional)* — cloud LLM for fast synthesis; set `GROQ_API_KEY` in `.env`
 - **Azure OpenAI** *(optional)* — alternative cloud LLM; set `AZURE_OPENAI_API_KEY` + endpoint in `.env`
-- **Redis** *(optional)* — semantic cache; cache hits return in < 5 ms
+- **Redis** *(optional)* — semantic cache; cache hits return in < 5 ms (`brew install redis && brew services start redis` on macOS)
 
----
-
-## Running locally (no Docker)
-
-```bash
-# 1. Install dependencies
-uv sync
-
-# 2. Pull models (one-time)
-ollama pull llama3.2
-ollama pull nomic-embed-text
-ollama pull llava          # for image captioning in Notion pages
-
-# 3. Start Ollama (keep running in a separate terminal)
-ollama serve
-
-# 4. Set your Notion token
-export NOTION_TOKEN=secret_xxx   # or add to .env
-
-# 5. Index your Notion workspace
-uv run python scripts/ingest.py
-
-# 6. Run a query (CLI)
-uv run python scripts/main.py
-
-# 7. Or launch the Streamlit UI
-uv run streamlit run app.py      # opens http://localhost:8501
-```
-
-### Redis (optional, local)
-
-```bash
-brew install redis && brew services start redis   # macOS
-# Redis will be available at redis://localhost:6379 (default in config/default.yaml)
-```
-
----
-
-## Running with Docker
-
-Docker runs the **Streamlit app** and **Redis** in containers. **Ollama always runs on your host** so it keeps GPU/Metal access.
-
-**How networking works:**
-- Inside the container, the app reaches your host Ollama via `host.docker.internal:11434` (configured in `config/docker.yaml`).
-- `docker-compose.yml` adds `host.docker.internal` automatically — this works on macOS, Windows, and Linux without any extra setup.
-- Redis runs inside a container; the app connects to it via Docker's internal network.
-
-**Prerequisites:**
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/) installed and running
-- Ollama running on your host: `ollama serve`
-- Models pulled (one-time): `ollama pull llama3.2 && ollama pull nomic-embed-text`
-
-```bash
-# 1. Copy the secrets template and fill in your keys
-cp .env.example .env
-
-# 2. Build the image and start all services
-docker compose up --build
-
-# 3. Open the app
-open http://localhost:8502
-```
-
-> **Why 8502?** Streamlit listens on port 8501 inside the container, but Docker maps it to **8502** on your host (`8502:8501` in `docker-compose.yml`) to avoid conflicting with a local Streamlit instance you might already have running.
-
-On subsequent starts (no code changes), skip `--build`:
-
-```bash
-docker compose up
-```
-
-**Run ingestion inside the container** (indexes your Notion workspace into the Docker volume):
-
-```bash
-docker compose run --rm app uv run python scripts/ingest.py
-```
-
-**Stop everything:**
-
-```bash
-docker compose down
-```
-
-Your ChromaDB and BM25 indexes are stored in `./data/` on your machine and survive restarts. To wipe them and start fresh: `rm -rf ./data/`.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and run instructions.
 
 ---
 
@@ -115,17 +31,11 @@ NOTION_TOKEN=secret_xxx
 
 ## Ingestion
 
-```bash
-uv run python scripts/ingest.py           # incremental — skips unchanged pages, prunes deleted ones
-uv run python scripts/ingest.py --full    # force re-embed everything
-uv run python scripts/ingest.py --status  # print chunk/page counts and exit
-```
+Ingestion builds both a ChromaDB vector index and a BM25 index (`./data/bm25_index/`). Queries use both via Reciprocal Rank Fusion — BM25 catches exact keyword matches that vector search can miss. Incremental mode (default) uses `last_edited_time` to skip unchanged pages and prunes deleted ones. Use `--full` after changing chunking settings.
 
-Incremental mode (default) uses `last_edited_time` to skip unchanged pages and removes chunks for pages deleted from Notion. Use `--full` after changing chunking settings.
+Image blocks are processed with OCR (Tesseract) and optionally captioned via `llava`.
 
-Ingestion builds both the ChromaDB vector index and a BM25 index (`./data/bm25_index/`). Queries use both via Reciprocal Rank Fusion — BM25 catches exact keyword matches that vector search can miss, and vector search handles semantic similarity.
-
-Image blocks in Notion pages are processed with OCR (Tesseract) and optionally captioned via `llava`.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for ingest commands.
 
 ## Configuration
 
@@ -299,8 +209,4 @@ repo/
 
 ## Development
 
-```bash
-ruff format . && ruff check . --fix  # lint
-mypy . --strict                       # types
-pytest -x                             # tests
-```
+See [CONTRIBUTING.md](CONTRIBUTING.md).
