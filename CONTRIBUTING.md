@@ -9,7 +9,7 @@ ollama serve           # separate terminal
 uv run streamlit run app.py
 ```
 
-App runs at `http://localhost:8501`. ChromaDB is embedded — no separate server needed.
+App runs at `http://localhost:8501`. ChromaDB embedded — no separate server needed.
 
 ### Ingest (local)
 
@@ -21,14 +21,14 @@ uv run python scripts/ingest.py --status  # print stats
 
 ## Running with Docker
 
-Ollama must run on the host — the container reaches it via `host.docker.internal:11434`.
+Ollama run on host — container reaches via `host.docker.internal:11434`.
 
 ```bash
 cp .env.example .env   # add NOTION_TOKEN
 docker compose up --build
 ```
 
-App runs at `http://localhost:8502`. Redis is included and wired automatically.
+App runs at `http://localhost:8502`. Redis included, wired automatically.
 
 ### Ingest (Docker)
 
@@ -38,23 +38,23 @@ docker compose exec app uv run python scripts/ingest.py --full
 docker compose exec app uv run python scripts/ingest.py --status
 ```
 
-Data is written to `./data/` on the host (mounted volume) and persists across restarts.
+Data written to `./data/` on host (mounted volume), persists across restarts.
 
 ## Development
 
-After cloning, wire up the pre-commit hook once:
+After cloning, wire pre-commit hook once:
 
 ```bash
 uv run pre-commit install
 ```
 
-This runs ruff and pytest automatically on every `git commit`. To run the checks manually at any time:
+Runs ruff and pytest on every `git commit`. Manual check:
 
 ```bash
 uv run pre-commit run --all-files
 ```
 
-Type checking is not part of the hook and must be run separately:
+Type check not in hook, run separately:
 
 ```bash
 mypy . --strict
@@ -64,16 +64,16 @@ mypy . --strict
 
 ### Reporting issues
 
-Open a GitHub issue with a clear description of the problem, steps to reproduce, and the relevant config (local vs. Docker, model names).
+Open GitHub issue: description, repro steps, config (local vs Docker, model names).
 
 ### Submitting a PR
 
-1. Fork the repo and create a branch from `master`.
+1. Fork repo, branch from `master`.
 2. Branch names: `feat/<short-description>`, `fix/<short-description>`, `refactor/<short-description>`.
 3. Keep commits focused — one logical change per commit.
 4. Commit format: `<type>: <description>` (types: `feat`, `fix`, `refactor`, `test`, `docs`).
-5. Run lint, type check, and tests before opening the PR.
-6. Reference any related issues in the PR description.
+5. Run lint, type check, tests before PR.
+6. Reference related issues in PR.
 
 ### What belongs where
 
@@ -82,4 +82,4 @@ Open a GitHub issue with a clear description of the problem, steps to reproduce,
 | New retrieval strategy | Add under `src/agentic_rag/retrieval/` |
 | New LLM backend | Add under `src/agentic_rag/llm/` |
 | New config key | Add to `config/default.yaml` and `config/docker.yaml`, update `src/agentic_rag/config.py` |
-| New script | Add under `scripts/`, keep it a thin CLI wrapper over library code |
+| New script | Add under `scripts/`, thin CLI wrapper over library code |

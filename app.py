@@ -67,7 +67,7 @@ def _service_statuses() -> list:
     )
 
 
-@st.cache_resource
+@st.cache_resource(show_spinner=False)
 def get_pipeline() -> PipelineCoordinator:
     return create_pipeline()
 

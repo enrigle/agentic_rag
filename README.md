@@ -1,15 +1,15 @@
 # Agentic RAG
 
-Local agentic RAG system using Ollama (llama3.2) and a Notion knowledge base. Optionally uses Groq or Azure OpenAI for fast cloud synthesis and Redis for semantic caching.
+Local agentic RAG system using Ollama (llama3.2) + Notion knowledge base. Optionally uses Groq or Azure OpenAI for fast cloud synthesis and Redis for semantic caching.
 
 ## Prerequisites
 
 - **Python 3.12+** and **[uv](https://docs.astral.sh/uv/getting-started/installation/)**
-- **[Ollama](https://ollama.com)** — runs on your host in both local and Docker setups
+- **[Ollama](https://ollama.com)** — runs on host in both local and Docker setups
 - **[Tesseract](https://github.com/tesseract-ocr/tesseract)** — OCR for image blocks (`brew install tesseract` on macOS)
 - **Groq** *(optional)* — cloud LLM for fast synthesis; set `GROQ_API_KEY` in `.env`
 - **Azure OpenAI** *(optional)* — alternative cloud LLM; set `AZURE_OPENAI_API_KEY` + endpoint in `.env`
-- **Redis** *(optional)* — semantic cache; cache hits return in < 5 ms (`brew install redis && brew services start redis` on macOS)
+- **Redis** *(optional)* — semantic cache; hits return in < 5 ms (`brew install redis && brew services start redis` on macOS)
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and run instructions.
 
@@ -17,29 +17,29 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and run instructions.
 
 ## UI (Streamlit)
 
-The sidebar shows live **service health** (Ollama, Redis, Groq, ChromaDB) and a **Chunking** tool to paste text and preview chunk counts for different `ingestion.chunk_size` / `ingestion.chunk_overlap` values.
+Sidebar shows live **service health** (Ollama, Redis, Groq, ChromaDB) and **Chunking** tool to paste text and preview chunk counts for different `ingestion.chunk_size` / `ingestion.chunk_overlap` values.
 
 ### Notion setup
 
-1. Go to [notion.so/my-integrations](https://www.notion.so/my-integrations) → create an **Internal Integration** → copy the secret.
-2. For each page to index: open the page → **"..."** → **"Connect to"** → select your integration.
+1. Go to [notion.so/my-integrations](https://www.notion.so/my-integrations) → create **Internal Integration** → copy secret.
+2. Each page to index: open page → **"..."** → **"Connect to"** → select integration.
 
-Store the token in `.env` at the project root:
+Store token in `.env` at project root:
 ```
 NOTION_TOKEN=secret_xxx
 ```
 
 ## Ingestion
 
-Ingestion builds both a ChromaDB vector index and a BM25 index (`./data/bm25_index/`). Queries use both via Reciprocal Rank Fusion — BM25 catches exact keyword matches that vector search can miss. Incremental mode (default) uses `last_edited_time` to skip unchanged pages and prunes deleted ones. Use `--full` after changing chunking settings.
+Ingestion builds ChromaDB vector index and BM25 index (`./data/bm25_index/`). Queries use both via Reciprocal Rank Fusion — BM25 catches exact keyword matches vector search can miss. Incremental mode (default) uses `last_edited_time` to skip unchanged pages, prunes deleted ones. Use `--full` after changing chunking settings.
 
-Image blocks are processed with OCR (Tesseract) and optionally captioned via `llava`.
+Image blocks processed with OCR (Tesseract), optionally captioned via `llava`.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for ingest commands.
 
 ## Configuration
 
-Settings live in `config/default.yaml` (local) and `config/docker.yaml` (Docker) and are loaded into typed dataclasses at startup:
+Settings live in `config/default.yaml` (local) and `config/docker.yaml` (Docker), loaded into typed dataclasses at startup:
 
 ```yaml
 chroma_path: ./data/chroma_db
@@ -109,14 +109,14 @@ uv run python scripts/eval.py           # run queries and rate answers interacti
 uv run python scripts/eval.py --report  # print pass-rate summary from saved results
 ```
 
-Results are saved to `evals/results.jsonl`.
+Results saved to `evals/results.jsonl`.
 
 ## Optional: Langfuse tracing
 
-This repo has optional Langfuse tracing for LangGraph runs + Ollama calls. When enabled:
+Optional Langfuse tracing for LangGraph runs + Ollama calls. When enabled:
 
-- `main.AgenticRAGSystem.query()` returns a `trace_id`
-- `eval.py` logs your `[y/n]` rating back to Langfuse as a `human_rating` score
+- `main.AgenticRAGSystem.query()` returns `trace_id`
+- `eval.py` logs `[y/n]` rating back to Langfuse as `human_rating` score
 
 ```bash
 uv add langfuse
@@ -127,7 +127,7 @@ export LANGFUSE_HOST=...   # optional (cloud or self-hosted)
 
 ## Conversation memory (follow-ups)
 
-To answer follow-up questions, the app keeps a rolling in-memory chat history per `thread_id` and uses it as extra context for retrieval + synthesis. Pass a stable `thread_id` when calling `AgenticRAGSystem.query()`. The Streamlit UI automatically generates a per-session `thread_id`.
+App keeps rolling in-memory chat history per `thread_id`, uses it as extra context for retrieval + synthesis. Pass stable `thread_id` when calling `AgenticRAGSystem.query()`. Streamlit UI auto-generates per-session `thread_id`.
 
 ## Architecture
 
@@ -165,7 +165,7 @@ flowchart TD
   end
 ```
 
-`PipelineCoordinator` runs sources in priority order: `RAGSource` first, `WebSource` only if the KB returns no vector results above `min_similarity`. Conversation memory is per `thread_id`.
+`PipelineCoordinator` runs sources in priority order: `RAGSource` first, `WebSource` only if KB returns no vector results above `min_similarity`. Conversation memory is per `thread_id`.
 
 ```
 src/agentic_rag/
