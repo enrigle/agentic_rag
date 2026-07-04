@@ -45,10 +45,12 @@ def create_pipeline(config: RAGConfig | None = None) -> PipelineCoordinator:
 
     synth_llm: BaseLLM = llm
     if config.groq.is_configured():
-        synth_llm = GroqLLM(config.groq)
+        synth_llm = GroqLLM(config.groq, timeout=config.llm.request_timeout)
         logger.info("Synthesis: GroqLLM (model=%s)", config.groq.model)
     elif config.azure_openai.is_configured():
-        synth_llm = AzureOpenAILLM(config.azure_openai)
+        synth_llm = AzureOpenAILLM(
+            config.azure_openai, timeout=config.llm.request_timeout
+        )
         logger.info(
             "Synthesis: AzureOpenAILLM deployment=%s", config.azure_openai.deployment
         )
@@ -65,4 +67,5 @@ def create_pipeline(config: RAGConfig | None = None) -> PipelineCoordinator:
         memory=ConversationMemory(),
         max_tool_calls=config.max_tool_calls,
         cache=cache,
+        embed_llm=llm,
     )

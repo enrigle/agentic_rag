@@ -33,6 +33,10 @@ class CrossEncoderReranker:
         """
         if not candidates:
             return []
+        # ponytail: cross-encoder only runs when there are more candidates than
+        # slots — otherwise every candidate is kept and predict() can't change that.
+        if len(candidates) <= self._top_k:
+            return candidates
         pairs = [(query, c["content"]) for c in candidates]
         scores: list[float] = self._model.predict(pairs).tolist()
         ranked = sorted(zip(scores, candidates), key=lambda x: x[0], reverse=True)

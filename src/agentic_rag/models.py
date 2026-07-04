@@ -32,3 +32,4 @@ class PipelineContext:
     error: str | None
     tool_calls: int
     max_tool_calls: int
+    query_vec: list[float] | None = None  # embedded once, reused by cache + retrieval

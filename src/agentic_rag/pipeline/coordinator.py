@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import time
 
+from agentic_rag.llm.base import BaseLLM
 from agentic_rag.models import PipelineContext, QueryResult, SearchResult
 from agentic_rag.observability.langfuse import observation as _lf_obs
 from agentic_rag.pipeline.memory import ConversationMemory
@@ -24,6 +25,7 @@ class PipelineCoordinator:
         synthesizer: Synthesizer,
         memory: ConversationMemory,
         max_tool_calls: int,
+        embed_llm: BaseLLM,
         cache: SemanticCache | None = None,
     ) -> None:
         self._sources = sources
@@ -31,15 +33,24 @@ class PipelineCoordinator:
         self._synthesizer = synthesizer
         self._memory = memory
         self._max_tool_calls = max_tool_calls
+        self._embed_llm = embed_llm
         self._cache = cache
 
     async def query(self, user_query: str, thread_id: str = "default") -> QueryResult:
         if not user_query:
             raise ValueError("user_query cannot be empty")
 
+        # Embed once; reused by the cache lookup, retrieval, and cache store.
+        # On failure, leave None — downstream falls back to embedding itself.
+        query_vec: list[float] | None = None
+        try:
+            query_vec = await self._embed_llm.embed(user_query)
+        except Exception:  # noqa: BLE001
+            logger.debug("embed() failed up front; downstream will retry/skip")
+
         # Cache check — return immediately on hit
         if self._cache is not None:
-            cached = await self._cache.get(user_query)
+            cached = await self._cache.get(user_query, query_vec)
             if cached is not None:
                 logger.debug("cache hit for query len=%d", len(user_query))
                 return cached
@@ -53,6 +64,7 @@ class PipelineCoordinator:
             error=None,
             tool_calls=0,
             max_tool_calls=self._max_tool_calls,
+            query_vec=query_vec,
         )
 
         with _lf_obs("pipeline.query", as_type="span", input={"query": user_query}):
@@ -101,6 +113,6 @@ class PipelineCoordinator:
         )
 
         if self._cache is not None:
-            await self._cache.set(user_query, result)
+            await self._cache.set(user_query, result, query_vec)
 
         return result
