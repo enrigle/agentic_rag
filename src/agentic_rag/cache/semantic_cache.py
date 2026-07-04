@@ -27,23 +27,50 @@ class SemanticCache:
         )
         self._available = True
 
-    async def get(self, query: str) -> Optional[QueryResult]:
-        """Return cached QueryResult for the best-matching similar query, else None."""
+    async def get(
+        self, query: str, query_vec: Optional[list[float]] = None
+    ) -> Optional[QueryResult]:
+        """Return cached QueryResult for the best-matching similar query, else None.
+
+        ``query_vec`` lets the caller pass a precomputed embedding to avoid a
+        redundant embed call; when None the query is embedded here.
+        """
         if not self._available:
             return None
 
-        try:
-            vec = await self._embed_llm.embed(query)
-        except Exception:
-            logger.debug("embed() failed during cache lookup; skipping cache")
+        query_arr = await self._query_vector(query, query_vec)
+        if query_arr is None:
             return None
 
-        query_arr = np.array(vec, dtype=np.float32)
+        keys = await self._scan_keys()
+        if not keys:
+            return None
 
+        all_data = await self._fetch_hashes(keys)
+        if all_data is None:
+            return None
+
+        return self._best_match(query_arr, keys, all_data)
+
+    async def _query_vector(
+        self, query: str, query_vec: Optional[list[float]]
+    ) -> Optional[np.ndarray]:
+        """Embed the query (if needed) and return it as a float32 array, or None."""
+        if query_vec is None:
+            try:
+                query_vec = await self._embed_llm.embed(query)
+            except Exception:
+                logger.debug("embed() failed during cache lookup; skipping cache")
+                return None
+
+        query_arr = np.array(query_vec, dtype=np.float32)
         if query_arr.size == 0:
             logger.warning("embed() returned empty vector; skipping cache lookup")
             return None
+        return query_arr
 
+    async def _scan_keys(self) -> Optional[list[bytes]]:
+        """Return all cache:* keys, or None if Redis is unavailable."""
         try:
             cursor = 0
             keys: list[bytes] = []
@@ -55,30 +82,36 @@ class SemanticCache:
                 keys.extend(batch)
                 if cursor == 0:
                     break
+            return keys
         except aioredis.RedisError:
             self._available = False
             logger.warning("Redis unavailable at %s; cache disabled", self._config.url)
             return None
 
-        if not keys:
+    async def _fetch_hashes(
+        self, keys: list[bytes]
+    ) -> Optional[list[dict[bytes, bytes]]]:
+        """Fetch every candidate hash in a single round-trip, or None on error."""
+        try:
+            pipe = self._redis.pipeline()
+            for key in keys:
+                pipe.hgetall(key.decode() if isinstance(key, bytes) else key)
+            return cast(list[dict[bytes, bytes]], await pipe.execute())
+        except aioredis.RedisError:
+            logger.warning("Redis pipeline HGETALL failed; skipping", exc_info=True)
             return None
 
+    def _best_match(
+        self,
+        query_arr: np.ndarray,
+        keys: list[bytes],
+        all_data: list[dict[bytes, bytes]],
+    ) -> Optional[QueryResult]:
+        """Return the QueryResult of the most similar candidate above threshold."""
         best_similarity = -1.0
         best_result: Optional[QueryResult] = None
 
-        for key in keys:
-            str_key = key.decode() if isinstance(key, bytes) else key
-            try:
-                data: dict[bytes, bytes] = cast(
-                    dict[bytes, bytes],
-                    await cast(Any, self._redis.hgetall(str_key)),
-                )
-            except aioredis.RedisError:
-                logger.warning(
-                    "Redis HGETALL failed for key %s; skipping", str_key, exc_info=True
-                )
-                return None
-
+        for key, data in zip(keys, all_data):
             if b"embedding" not in data:
                 continue
 
@@ -117,14 +150,21 @@ class SemanticCache:
 
         return best_result
 
-    async def set(self, query: str, result: QueryResult) -> None:
-        """Store query result in Redis with TTL."""
+    async def set(
+        self, query: str, result: QueryResult, query_vec: Optional[list[float]] = None
+    ) -> None:
+        """Store query result in Redis with TTL.
+
+        ``query_vec`` lets the caller pass a precomputed embedding to avoid a
+        redundant embed call; when None the query is embedded here.
+        """
         if not self._available:
             return
 
         try:
-            vec = await self._embed_llm.embed(query)
-            arr = np.array(vec, dtype=np.float32)
+            if query_vec is None:
+                query_vec = await self._embed_llm.embed(query)
+            arr = np.array(query_vec, dtype=np.float32)
             key_hash = hashlib.sha256(arr.tobytes()).hexdigest()
             key = f"cache:{key_hash}"
             result_dict = dataclasses.asdict(result)

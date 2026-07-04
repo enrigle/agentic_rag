@@ -45,6 +45,7 @@ def _make_coordinator(
         synthesizer=Synthesizer(mock_llm),
         memory=ConversationMemory(),
         max_tool_calls=config.max_tool_calls,
+        embed_llm=mock_llm,
     )
 
 
@@ -61,6 +62,17 @@ async def test_query_returns_query_result(
     assert isinstance(result.sources, list)
     assert isinstance(result.tool_calls_used, int)
     assert isinstance(result.latency_ms, float)
+
+
+@pytest.mark.asyncio
+async def test_query_embeds_once_per_call(
+    mock_llm: BaseLLM,
+    sample_config: RAGConfig,
+) -> None:
+    """Query is embedded a single time and reused downstream (no cache attached)."""
+    coordinator = _make_coordinator(mock_llm, sample_config)
+    await coordinator.query("only embed me once")
+    assert mock_llm.embed.call_count == 1  # type: ignore[attr-defined]
 
 
 @pytest.mark.asyncio
@@ -120,6 +132,7 @@ async def test_query_stops_when_first_source_has_results(
         synthesizer=Synthesizer(mock_llm),
         memory=ConversationMemory(),
         max_tool_calls=sample_config.max_tool_calls,
+        embed_llm=mock_llm,
     )
     await coordinator.query("question")
     second_source.search.assert_not_called()
@@ -151,6 +164,7 @@ async def test_query_falls_through_to_second_source_when_first_is_empty(
         synthesizer=Synthesizer(mock_llm),
         memory=ConversationMemory(),
         max_tool_calls=sample_config.max_tool_calls,
+        embed_llm=mock_llm,
     )
     await coordinator.query("question about karpathy")
     second_source.search.assert_called_once()

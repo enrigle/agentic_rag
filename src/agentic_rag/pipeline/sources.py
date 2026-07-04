@@ -34,7 +34,7 @@ class RAGSource:
 
     async def search(self, query: str, ctx: PipelineContext) -> list[dict[str, Any]]:
         with _lf_obs("rag_search", as_type="retriever", input={"query": query}):
-            query_vec = await self._llm.embed(query)
+            query_vec = ctx.query_vec or await self._llm.embed(query)
             results = await self._hybrid.search(query_vec=query_vec, query_text=query)
         logger.info("RAGSource: %d results", len(results))
         return [

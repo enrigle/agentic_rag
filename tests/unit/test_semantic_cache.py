@@ -52,6 +52,21 @@ def _make_scan_side_effect(keys: list[bytes]) -> AsyncMock:
 # ── fixtures ──────────────────────────────────────────────────────────────────
 
 
+class _PipelineMock:
+    """Mimics a redis pipeline by delegating queued HGETALLs to redis.hgetall."""
+
+    def __init__(self, redis: MagicMock) -> None:
+        self._redis = redis
+        self._keys: list[str | bytes] = []
+
+    def hgetall(self, key: str | bytes) -> "_PipelineMock":
+        self._keys.append(key)
+        return self
+
+    async def execute(self) -> list[dict[bytes, bytes]]:
+        return [await self._redis.hgetall(k) for k in self._keys]
+
+
 @pytest.fixture
 def mock_redis() -> MagicMock:
     r = MagicMock()
@@ -59,6 +74,7 @@ def mock_redis() -> MagicMock:
     r.hgetall = AsyncMock(return_value={})
     r.hset = AsyncMock()
     r.expire = AsyncMock()
+    r.pipeline = MagicMock(side_effect=lambda: _PipelineMock(r))
     return r
 
 

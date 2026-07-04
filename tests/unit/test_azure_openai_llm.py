@@ -70,6 +70,7 @@ def test_init_accepts_api_key_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
         azure_endpoint=config.endpoint,
         api_key="env-key",
         api_version=config.api_version,
+        timeout=30.0,
     )
 
 

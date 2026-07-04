@@ -23,6 +23,7 @@ class LLMConfig:
     model: str = "llama3.2"
     embed_model: str = "nomic-embed-text"
     base_url: str = "http://localhost:11434"
+    request_timeout: float = 30.0  # seconds; applied to Ollama + OpenAI-compat clients
 
 
 @dataclass

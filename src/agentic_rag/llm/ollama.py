@@ -17,7 +17,9 @@ class OllamaLLM(BaseLLM):
         if not config.base_url:
             raise ValueError("LLMConfig.base_url must not be empty")
         self._config = config
-        self._client = ollama.AsyncClient(host=config.base_url)
+        self._client = ollama.AsyncClient(
+            host=config.base_url, timeout=config.request_timeout
+        )
         logger.debug(
             "OllamaLLM initialised: model=%s embed_model=%s base_url=%s",
             config.model,

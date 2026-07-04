@@ -56,21 +56,23 @@ def test_rerank_scores_descending(reranker: CrossEncoderReranker) -> None:
 def test_rerank_score_field_overwritten(reranker: CrossEncoderReranker) -> None:
     import numpy as np
 
-    candidates = [{"id": "a", "content": "hello", "score": 999.0}]
-    reranker._model.predict.return_value = np.array([0.42])
+    # More candidates than top_k=3 so the cross-encoder actually runs.
+    candidates = _make_candidates(4)
+    candidates[0]["score"] = 999.0
+    reranker._model.predict.return_value = np.array([0.42, 0.1, 0.2, 0.3])
 
     result = reranker.rerank("query", candidates)
 
-    assert len(result) == 1
+    # Top result is candidate 0 (highest predict score) with its score overwritten.
+    assert result[0]["id"] == "0"
     assert result[0]["score"] == pytest.approx(0.42)
 
 
 def test_rerank_fewer_candidates_than_top_k(reranker: CrossEncoderReranker) -> None:
-    import numpy as np
-
     candidates = _make_candidates(2)  # top_k=3 but only 2 candidates
-    reranker._model.predict.return_value = np.array([0.7, 0.3])
 
     result = reranker.rerank("query", candidates)
 
-    assert len(result) == 2
+    # Skip-guard: no forward pass needed when every candidate is kept anyway.
+    assert result == candidates
+    reranker._model.predict.assert_not_called()

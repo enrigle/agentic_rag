@@ -64,7 +64,7 @@ class OpenAICompatLLM(BaseLLM):
 class AzureOpenAILLM(OpenAICompatLLM):
     """Synthesis-only LLM backed by Azure OpenAI."""
 
-    def __init__(self, config: AzureOpenAIConfig) -> None:
+    def __init__(self, config: AzureOpenAIConfig, timeout: float = 30.0) -> None:
         if not config.endpoint:
             raise ValueError("AzureOpenAIConfig.endpoint must not be empty")
         resolved_key = config.api_key or os.environ.get("AZURE_OPENAI_API_KEY")
@@ -77,6 +77,7 @@ class AzureOpenAILLM(OpenAICompatLLM):
                 azure_endpoint=config.endpoint,
                 api_key=resolved_key,
                 api_version=config.api_version,
+                timeout=timeout,
             ),
             model=config.deployment,
             provider="Azure OpenAI",
@@ -86,12 +87,14 @@ class AzureOpenAILLM(OpenAICompatLLM):
 class GroqLLM(OpenAICompatLLM):
     """Synthesis-only LLM backed by Groq (via OpenAI-compatible API)."""
 
-    def __init__(self, config: GroqConfig) -> None:
+    def __init__(self, config: GroqConfig, timeout: float = 30.0) -> None:
         resolved_key = config.api_key or os.environ.get("GROQ_API_KEY")
         if not resolved_key:
             raise ValueError("GroqConfig.api_key or GROQ_API_KEY env var must be set")
         super().__init__(
-            client=openai.AsyncOpenAI(base_url=_GROQ_BASE_URL, api_key=resolved_key),
+            client=openai.AsyncOpenAI(
+                base_url=_GROQ_BASE_URL, api_key=resolved_key, timeout=timeout
+            ),
             model=config.model,
             provider="Groq",
         )
