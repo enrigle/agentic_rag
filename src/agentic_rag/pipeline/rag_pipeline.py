@@ -62,6 +62,7 @@ def create_pipeline(config: RAGConfig | None = None) -> PipelineCoordinator:
         reranker=CrossEncoderReranker(
             model=config.retriever.reranker_model,
             top_k=config.retriever.reranker_top_k,
+            min_score=config.retriever.reranker_min_score,
         ),
         synthesizer=Synthesizer(synth_llm),
         memory=ConversationMemory(),

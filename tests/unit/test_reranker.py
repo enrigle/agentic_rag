@@ -13,15 +13,21 @@ def _make_candidates(n: int) -> list[dict]:
     return [{"id": str(i), "content": f"doc {i}", "score": 0.0} for i in range(n)]
 
 
-@pytest.fixture()
-def reranker() -> CrossEncoderReranker:
+def _make_reranker(min_score: float | None = None) -> CrossEncoderReranker:
     """CrossEncoderReranker with a mocked CrossEncoder to avoid downloading weights."""
     with patch("agentic_rag.retrieval.reranker.CrossEncoder") as mock_cls:
         mock_model = MagicMock()
         mock_cls.return_value = mock_model
-        instance = CrossEncoderReranker(model="mock-model", top_k=3)
+        instance = CrossEncoderReranker(
+            model="mock-model", top_k=3, min_score=min_score
+        )
         instance._model = mock_model
-        yield instance
+        return instance
+
+
+@pytest.fixture()
+def reranker() -> CrossEncoderReranker:
+    return _make_reranker()
 
 
 def test_rerank_empty_candidates(reranker: CrossEncoderReranker) -> None:
@@ -76,3 +82,42 @@ def test_rerank_fewer_candidates_than_top_k(reranker: CrossEncoderReranker) -> N
     # Skip-guard: no forward pass needed when every candidate is kept anyway.
     assert result == candidates
     reranker._model.predict.assert_not_called()
+
+
+def test_rerank_min_score_drops_low_scores() -> None:
+    import numpy as np
+
+    gated = _make_reranker(min_score=0.0)
+    candidates = _make_candidates(4)
+    gated._model.predict.return_value = np.array([-5.0, 2.0, -0.1, 0.5])
+
+    result = gated.rerank("query", candidates)
+
+    assert [r["id"] for r in result] == ["1", "3"]  # only scores >= 0.0 survive
+
+
+def test_rerank_min_score_can_return_empty() -> None:
+    import numpy as np
+
+    gated = _make_reranker(min_score=0.0)
+    candidates = _make_candidates(3)
+    gated._model.predict.return_value = np.array([-8.0, -6.5, -9.1])
+
+    result = gated.rerank("query", candidates)
+
+    assert result == []
+
+
+def test_rerank_min_score_disables_skip_guard() -> None:
+    import numpy as np
+
+    # 2 candidates <= top_k=3: without a gate predict is skipped, with a gate
+    # it must run so irrelevant docs can be dropped.
+    gated = _make_reranker(min_score=0.0)
+    candidates = _make_candidates(2)
+    gated._model.predict.return_value = np.array([1.0, -1.0])
+
+    result = gated.rerank("query", candidates)
+
+    gated._model.predict.assert_called_once()
+    assert [r["id"] for r in result] == ["0"]

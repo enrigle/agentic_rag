@@ -74,17 +74,21 @@ class PipelineCoordinator:
                         logger.warning("Circuit breaker: max tool calls reached")
                         break
                     new_results = await source.search(user_query, ctx)
-                    ctx.results.extend(new_results)
                     ctx.tool_calls += 1
-                    if new_results:
+                    # Rerank per source: the cross-encoder relevance gate can
+                    # empty the list, letting off-topic queries fall through
+                    # to the next source (e.g. web) instead of stopping here.
+                    relevant = self._reranker.rerank(user_query, new_results)
+                    if relevant:
                         logger.info(
-                            "%s: %d results found, stopping",
+                            "%s: %d relevant results, stopping",
                             source.name,
-                            len(new_results),
+                            len(relevant),
                         )
+                        ctx.results = relevant
                         break
+                    logger.info("%s: no relevant results, falling through", source.name)
 
-                ctx.results = self._reranker.rerank(user_query, ctx.results)
                 ctx.final_answer = await self._synthesizer.synthesize(user_query, ctx)
 
             except Exception as exc:
