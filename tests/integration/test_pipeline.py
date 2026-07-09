@@ -21,6 +21,13 @@ def _make_mock_source(name: str, results: list[dict], score: float = 0.9):
     return source
 
 
+def _identity_reranker() -> MagicMock:
+    """Reranker mock that passes candidates through unchanged (no gate)."""
+    reranker = MagicMock(spec=CrossEncoderReranker)
+    reranker.rerank = MagicMock(side_effect=lambda query, candidates: candidates)
+    return reranker
+
+
 def _make_coordinator(
     mock_llm: BaseLLM,
     config: RAGConfig,
@@ -37,8 +44,7 @@ def _make_coordinator(
             }
         ]
     mock_source = _make_mock_source("rag", source_results)
-    reranker = MagicMock(spec=CrossEncoderReranker)
-    reranker.rerank = MagicMock(return_value=source_results)
+    reranker = _identity_reranker()
     return PipelineCoordinator(
         sources=[mock_source],
         reranker=reranker,
@@ -123,12 +129,10 @@ async def test_query_stops_when_first_source_has_results(
     ]
     first_source = _make_mock_source("rag", rag_results)
     second_source = _make_mock_source("web", [])
-    reranker = MagicMock(spec=CrossEncoderReranker)
-    reranker.rerank = MagicMock(return_value=rag_results)
 
     coordinator = PipelineCoordinator(
         sources=[first_source, second_source],
-        reranker=reranker,
+        reranker=_identity_reranker(),
         synthesizer=Synthesizer(mock_llm),
         memory=ConversationMemory(),
         max_tool_calls=sample_config.max_tool_calls,
@@ -155,8 +159,40 @@ async def test_query_falls_through_to_second_source_when_first_is_empty(
     ]
     first_source = _make_mock_source("rag", [])
     second_source = _make_mock_source("web", web_results)
+
+    coordinator = PipelineCoordinator(
+        sources=[first_source, second_source],
+        reranker=_identity_reranker(),
+        synthesizer=Synthesizer(mock_llm),
+        memory=ConversationMemory(),
+        max_tool_calls=sample_config.max_tool_calls,
+        embed_llm=mock_llm,
+    )
+    await coordinator.query("question about karpathy")
+    second_source.search.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_query_falls_through_when_reranker_gates_out_first_source(
+    mock_llm: BaseLLM,
+    sample_config: RAGConfig,
+) -> None:
+    """RAG returns hits but none pass the relevance gate → web source is tried."""
+    rag_results = [
+        {"id": "1", "title": "T", "source": "s", "content": "off-topic", "score": 0.9}
+    ]
+    web_results = [
+        {"id": "2", "title": "Web", "source": "w", "content": "on-topic", "score": 0.8}
+    ]
+    first_source = _make_mock_source("rag", rag_results)
+    second_source = _make_mock_source("web", web_results)
     reranker = MagicMock(spec=CrossEncoderReranker)
-    reranker.rerank = MagicMock(return_value=web_results)
+    # Gate empties the RAG results; web results pass through.
+    reranker.rerank = MagicMock(
+        side_effect=lambda query, candidates: (
+            [] if candidates == rag_results else candidates
+        )
+    )
 
     coordinator = PipelineCoordinator(
         sources=[first_source, second_source],
@@ -166,8 +202,9 @@ async def test_query_falls_through_to_second_source_when_first_is_empty(
         max_tool_calls=sample_config.max_tool_calls,
         embed_llm=mock_llm,
     )
-    await coordinator.query("question about karpathy")
+    result = await coordinator.query("what's the temperature in madrid")
     second_source.search.assert_called_once()
+    assert [s.id for s in result.sources] == ["2"]
 
 
 @pytest.mark.asyncio

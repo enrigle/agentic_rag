@@ -34,6 +34,9 @@ class RetrieverConfig:
     bm25_top_k: int = 10
     reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-2-v2"
     reranker_top_k: int = 5
+    # Cross-encoder logit gate: candidates scoring below are dropped, letting
+    # off-topic queries fall through to the next source (web). None disables.
+    reranker_min_score: Optional[float] = 0.0
     few_shot_max: int = 3
 
 
