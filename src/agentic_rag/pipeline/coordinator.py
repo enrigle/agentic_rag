@@ -94,7 +94,11 @@ class PipelineCoordinator:
             except Exception as exc:
                 logger.exception("PipelineCoordinator error: %s", exc)
                 ctx.error = str(exc)
-                ctx.final_answer = f"Pipeline error: {exc}"
+                # Detail stays in ctx.error/logs; the user-facing string is fixed so
+                # internal paths and provider errors never reach the browser.
+                ctx.final_answer = (
+                    "Something went wrong answering that. Please try again."
+                )
 
         self._memory.append(thread_id, user_query, ctx.final_answer or "")
         latency_ms = round((time.monotonic() - t0) * 1000, 2)

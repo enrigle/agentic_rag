@@ -26,6 +26,10 @@ RUN uv sync --no-dev \
     --extra-index-url https://download.pytorch.org/whl/cpu \
     && uv cache clean
 
+# Run unprivileged. /app must be writable: uv writes .venv, the app writes data/.
+RUN useradd --create-home --uid 10001 appuser && chown -R appuser:appuser /app
+USER appuser
+
 EXPOSE 8501
 
 CMD ["uv", "run", "--no-sync", "streamlit", "run", "app.py", \

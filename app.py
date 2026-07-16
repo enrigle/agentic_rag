@@ -4,9 +4,11 @@ import asyncio
 
 logging.getLogger("streamlit.watcher.local_sources_watcher").setLevel(logging.ERROR)
 logging.getLogger("transformers").setLevel(logging.ERROR)
+import re
 import threading
 import uuid
-from typing import TypedDict
+from typing import Any, TypedDict
+from urllib.parse import urlparse
 
 import streamlit as st
 from dotenv import load_dotenv
@@ -25,6 +27,15 @@ from agentic_rag.pipeline.coordinator import PipelineCoordinator
 from agentic_rag.pipeline.rag_pipeline import create_pipeline
 
 
+logger = logging.getLogger(__name__)
+
+# Cap on retained conversations; oldest are evicted. thread_id comes from the URL,
+# so an unbounded store lets anyone grow process memory without limit.
+_MAX_THREADS = 100
+
+_MD_SPECIAL = re.compile(r"([\\`*_\[\]()<>#+\-!])")
+
+
 class _SyncState(TypedDict):
     status: str
     chunks: int
@@ -34,6 +45,12 @@ class _SyncState(TypedDict):
 @st.cache_resource
 def _get_sync_state() -> _SyncState:
     return {"status": "idle", "chunks": 0, "error": ""}
+
+
+@st.cache_resource
+def _get_ingest_lock() -> threading.Lock:
+    """Process-wide lock so N browser sessions cannot fan out into N ingests."""
+    return threading.Lock()
 
 
 _sync_state = _get_sync_state()
@@ -49,9 +66,39 @@ def _run_ingest() -> None:
         total = asyncio.run(ingester.ingest(full=False))
         _sync_state["chunks"] = total
         _sync_state["status"] = "done"
-    except Exception as exc:  # noqa: BLE001
-        _sync_state["error"] = str(exc)
+    except Exception:  # noqa: BLE001
+        # Detail goes to the server log only; the UI gets a fixed string.
+        logger.exception("ingest failed")
+        _sync_state["error"] = "see server logs"
         _sync_state["status"] = "error"
+
+
+def _maybe_start_ingest() -> bool:
+    """Start one ingest thread process-wide. Returns True if this call started it.
+
+    _sync_state is a cached (process-wide) resource, so the lock + status check
+    stop N concurrent browser sessions from fanning out into N Notion ingests.
+    """
+    with _get_ingest_lock():
+        if _sync_state["status"] == "syncing":
+            return False
+        _sync_state["status"] = "syncing"
+    threading.Thread(target=_run_ingest, daemon=True).start()
+    return True
+
+
+def _render_source(index: int, title: str, url: str) -> None:
+    """Render one source as a link, or as inert text if the URL is not http(s).
+
+    Titles and URLs come from ingested Notion content, so both are untrusted:
+    escape markdown and reject non-http schemes (javascript:, data:).
+    """
+    safe_title = _MD_SPECIAL.sub(r"\\\1", title)
+    label = f"{index}. {safe_title}"
+    if urlparse(url).scheme in ("http", "https"):
+        st.markdown(f"[{label}](<{url}>)")
+    else:
+        st.markdown(label)
 
 
 @st.cache_resource
@@ -97,10 +144,19 @@ def _conversation_store() -> dict:
     return {}
 
 
+def _store_conversation(thread_id: str, messages: list[Any]) -> None:
+    """Persist a thread's messages, evicting the oldest once over _MAX_THREADS."""
+    store = _conversation_store()
+    # Re-insert so an active thread moves to the back of the eviction order.
+    store.pop(thread_id, None)
+    store[thread_id] = messages
+    while len(store) > _MAX_THREADS:
+        store.pop(next(iter(store)))
+
+
 # ── Background ingest (once per session) ───────────────────────────────────────
 if not st.session_state.get("sync_started"):
-    _sync_state["status"] = "syncing"
-    threading.Thread(target=_run_ingest, daemon=True).start()
+    _maybe_start_ingest()
     st.session_state["sync_started"] = True
 
 # ── Session defaults ───────────────────────────────────────────────────────────
@@ -134,7 +190,7 @@ with st.sidebar:
         new_tid = str(uuid.uuid4())
         st.session_state.thread_id = new_tid
         st.session_state.messages = []
-        _store[new_tid] = []
+        _store_conversation(new_tid, [])
         st.query_params["thread_id"] = new_tid
         st.session_state.rated = False
         st.session_state.show_note = False
@@ -147,7 +203,7 @@ with st.sidebar:
     elif _status == "done":
         st.caption(f"✓ Synced · {_sync_state['chunks']} chunks indexed")
     elif _status == "error":
-        st.caption(f"✗ Sync failed: {_sync_state['error']}")
+        st.caption(f"✗ Sync failed ({_sync_state['error']})")
     else:
         st.caption("—")
 
@@ -190,11 +246,7 @@ for msg in st.session_state.messages:
             if r["sources"]:
                 with st.expander("Sources"):
                     for s in r["sources"]:
-                        st.markdown(
-                            f'<a href="{s["url"]}" target="_blank" rel="noopener noreferrer">'
-                            f"{s['index']}. {s['title']}</a>",
-                            unsafe_allow_html=True,
-                        )
+                        _render_source(s["index"], s["title"], s["url"])
             st.caption(
                 f"Tool calls: {r['tool_calls_used']} · Latency: {r['latency_ms']:.0f}ms"
             )
@@ -288,7 +340,7 @@ if query:
     st.session_state.messages.append(
         {"role": "assistant", "content": result["answer"], "result": result}
     )
-    _store[st.session_state.thread_id] = st.session_state.messages
+    _store_conversation(st.session_state.thread_id, st.session_state.messages)
     st.session_state.rated = False
     st.session_state.show_note = False
     st.rerun()
