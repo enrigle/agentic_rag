@@ -22,6 +22,23 @@ from agentic_rag.retrieval.reranker import CrossEncoderReranker
 logger = logging.getLogger(__name__)
 
 
+def make_embed_llm(config: RAGConfig) -> BaseLLM:
+    """Embedding LLM selected by config.embed_backend.
+
+    Shared by the pipeline and the in-app ingest so both sides always write
+    and query vectors in the same embedding space.
+    """
+    if config.embed_backend == "sentence_transformers":
+        llm: BaseLLM = SentenceTransformersLLM(config.llm.embed_model)
+        logger.info(
+            "Embeddings: SentenceTransformersLLM model=%s", config.llm.embed_model
+        )
+    else:
+        llm = OllamaLLM(config.llm)
+        logger.info("Embeddings: OllamaLLM (model=%s)", config.llm.embed_model)
+    return llm
+
+
 def create_pipeline(config: RAGConfig | None = None) -> PipelineCoordinator:
     """Wire PipelineCoordinator from config.
 
@@ -33,14 +50,7 @@ def create_pipeline(config: RAGConfig | None = None) -> PipelineCoordinator:
     if config is None:
         config = load_config()
 
-    if config.embed_backend == "sentence_transformers":
-        llm: BaseLLM = SentenceTransformersLLM(config.llm.embed_model)
-        logger.info(
-            "Embeddings: SentenceTransformersLLM model=%s", config.llm.embed_model
-        )
-    else:
-        llm = OllamaLLM(config.llm)
-        logger.info("Embeddings: OllamaLLM (model=%s)", config.llm.embed_model)
+    llm = make_embed_llm(config)
     hybrid = HybridRetriever(ChromaVectorStore(config), BM25Retriever(config), config)
 
     synth_llm: BaseLLM = llm
