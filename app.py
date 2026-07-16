@@ -21,10 +21,9 @@ from agentic_rag.feedback.store import FeedbackEntry, get_all, save, update_cate
 from agentic_rag.feedback.judge import classify_failure
 from agentic_rag.feedback.optimizer import apply_optimization
 from agentic_rag.ingestion.notion import NotionIngester
-from agentic_rag.llm.ollama import OllamaLLM
 from agentic_rag.models import QueryResult
 from agentic_rag.pipeline.coordinator import PipelineCoordinator
-from agentic_rag.pipeline.rag_pipeline import create_pipeline
+from agentic_rag.pipeline.rag_pipeline import create_pipeline, make_embed_llm
 
 
 logger = logging.getLogger(__name__)
@@ -61,7 +60,7 @@ def _run_ingest() -> None:
     _sync_state.update({"chunks": 0, "error": ""})
     try:
         config = load_config()
-        llm = OllamaLLM(config.llm)
+        llm = make_embed_llm(config)
         ingester = NotionIngester(config, llm)
         total = asyncio.run(ingester.ingest(full=False))
         _sync_state["chunks"] = total
