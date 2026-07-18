@@ -39,7 +39,12 @@ dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
     "ruff>=0.15.8",
+    "types-pyyaml>=6.0.12.20260518",
 ]
+
+[[tool.mypy.overrides]]
+module = ["bm25s", "bm25s.*", "tavily", "pytesseract"]
+ignore_missing_imports = true
 
 [tool.ruff]
 exclude = ["eval.py", "ingest.py", "main.py"]

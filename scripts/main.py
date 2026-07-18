@@ -3,12 +3,14 @@ import logging
 import asyncio
 import os
 import time
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Literal, TypedDict
+from typing import Any, Literal, TypedDict, cast
 
 import bm25s
 import chromadb
 from tavily import AsyncTavilyClient
+from langchain_core.runnables import RunnableConfig
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.checkpoint.memory import MemorySaver
@@ -142,7 +144,7 @@ class AgenticRAGSystem:
             vector = await self._embed_llm.embed(text)
         return vector
 
-    def _build_graph(self) -> CompiledStateGraph:
+    def _build_graph(self) -> CompiledStateGraph[AgentState, None, Any, Any]:
         """Build the LangGraph agent graph."""
         graph = StateGraph(AgentState)
 
@@ -226,10 +228,13 @@ class AgenticRAGSystem:
                 "tool_calls": state["tool_calls"] + 1,
             }
         except Exception as exc:
-            return _errors.state_from_exception(
-                state,
-                "analyze_query: unexpected error",
-                exc,
+            return cast(
+                AgentState,
+                _errors.state_from_exception(
+                    state,
+                    "analyze_query: unexpected error",
+                    exc,
+                ),
             )
 
     async def rag_search(self, state: AgentState) -> AgentState:
@@ -255,14 +260,18 @@ class AgenticRAGSystem:
         try:
             # --- Vector search ---
             query_vec = await self._embed(state["query"])
+            query_embeddings: list[Sequence[float] | Sequence[int]] = [query_vec]
 
             loop = asyncio.get_running_loop()
-            vector_raw: dict[str, Any] = await loop.run_in_executor(
-                None,
-                lambda: self.collection.query(
-                    query_embeddings=[query_vec],
-                    n_results=10,
-                    include=["documents", "distances", "metadatas"],
+            vector_raw: dict[str, Any] = cast(
+                dict[str, Any],
+                await loop.run_in_executor(
+                    None,
+                    lambda: self.collection.query(
+                        query_embeddings=query_embeddings,
+                        n_results=10,
+                        include=["documents", "distances", "metadatas"],
+                    ),
                 ),
             )
 
@@ -334,7 +343,9 @@ class AgenticRAGSystem:
                     ),
                 )
                 for fid, doc, meta in zip(
-                    fetched["ids"], fetched["documents"], fetched["metadatas"]
+                    fetched["ids"],
+                    fetched["documents"] or [],
+                    fetched["metadatas"] or [],
                 ):
                     vector_data[fid] = {"document": doc, "metadata": meta, "score": 0.0}
 
@@ -378,11 +389,14 @@ class AgenticRAGSystem:
             }
 
         except Exception as exc:
-            return _errors.state_from_exception(
-                state,
-                "rag_search: error",
-                exc,
-                updates={"rag_results": []},
+            return cast(
+                AgentState,
+                _errors.state_from_exception(
+                    state,
+                    "rag_search: error",
+                    exc,
+                    updates={"rag_results": []},
+                ),
             )
 
     async def web_search(self, state: AgentState) -> AgentState:
@@ -426,11 +440,14 @@ class AgenticRAGSystem:
                 "tool_calls": state["tool_calls"] + 1,
             }
         except Exception as exc:
-            return _errors.state_from_exception(
-                state,
-                "web_search: error",
-                exc,
-                updates={"web_results": []},
+            return cast(
+                AgentState,
+                _errors.state_from_exception(
+                    state,
+                    "web_search: error",
+                    exc,
+                    updates={"web_results": []},
+                ),
             )
 
     def should_web_search(
@@ -506,12 +523,15 @@ class AgenticRAGSystem:
                 "tool_calls": state["tool_calls"] + 1,
             }
         except Exception as exc:
-            return _errors.state_from_exception(
-                state,
-                "synthesize: generation failed",
-                exc,
-                updates={"final_answer": f"Generation failed: {exc}"},
-                set_error=False,
+            return cast(
+                AgentState,
+                _errors.state_from_exception(
+                    state,
+                    "synthesize: generation failed",
+                    exc,
+                    updates={"final_answer": f"Generation failed: {exc}"},
+                    set_error=False,
+                ),
             )
 
     async def query(
@@ -542,7 +562,7 @@ class AgenticRAGSystem:
             "error": None,
         }
 
-        config = {"configurable": {"thread_id": thread_id}}
+        config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
         t0 = time.monotonic()
         lf = _lf_client()
 
@@ -553,8 +573,9 @@ class AgenticRAGSystem:
             metadata=trace_metadata,
         ):
             try:
-                final_state: AgentState = await self.graph.ainvoke(
-                    initial_state, config=config
+                final_state = cast(
+                    AgentState,
+                    await self.graph.ainvoke(initial_state, config=config),
                 )
             except Exception as exc:
                 _errors.log("query: graph invocation failed", exc, level="exception")
@@ -595,7 +616,7 @@ class AgenticRAGSystem:
             self._chat_memory[thread_id] = self._trim_chat_history(
                 run_history + [{"role": "assistant", "content": answer}]
             )
-            result: dict[str, Any] = {
+            result = {
                 "answer": answer,
                 "sources": sources,
                 "tool_calls_used": final_state["tool_calls"],

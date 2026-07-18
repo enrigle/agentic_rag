@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
@@ -14,7 +16,9 @@ from agentic_rag.pipeline.synthesizer import Synthesizer
 from agentic_rag.retrieval.reranker import CrossEncoderReranker
 
 
-def _make_mock_source(name: str, results: list[dict], score: float = 0.9):
+def _make_mock_source(
+    name: str, results: list[dict[str, Any]], score: float = 0.9
+) -> MagicMock:
     source = MagicMock()
     source.name = name
     source.search = AsyncMock(return_value=results)
@@ -31,7 +35,7 @@ def _identity_reranker() -> MagicMock:
 def _make_coordinator(
     mock_llm: BaseLLM,
     config: RAGConfig,
-    source_results: list[dict] | None = None,
+    source_results: list[dict[str, Any]] | None = None,
 ) -> PipelineCoordinator:
     if source_results is None:
         source_results = [
