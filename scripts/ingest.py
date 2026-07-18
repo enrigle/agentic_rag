@@ -14,8 +14,9 @@ import logging
 import os
 import sys
 import urllib.request
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from dotenv import load_dotenv
 
@@ -26,6 +27,7 @@ import io
 import bm25s
 import chromadb
 import pytesseract
+from chromadb.api.types import Metadata, Where
 from PIL import Image
 from notion_client import AsyncClient
 from notion_client.helpers import async_collect_paginated_api
@@ -157,7 +159,8 @@ def _caption_image(url: str) -> str:
         with urllib.request.urlopen(url, timeout=10) as resp:
             image_bytes = resp.read()
         image = Image.open(io.BytesIO(image_bytes))
-        return pytesseract.image_to_string(image).strip()
+        text: str = pytesseract.image_to_string(image)
+        return text.strip()
     except Exception as exc:
         logger.warning("Image captioning failed (%s): %s", url, exc)
         return ""
@@ -263,10 +266,12 @@ async def ingest(args: argparse.Namespace) -> None:
 
     if args.status:
         all_chunks = collection.get(include=["metadatas"])
-        metadatas: list[dict[str, Any]] = all_chunks["metadatas"] or []
+        metadatas = all_chunks["metadatas"] or []
         page_ids = {m["page_id"] for m in metadatas if m and "page_id" in m}
         times = sorted(
-            m["last_edited_time"] for m in metadatas if m and m.get("last_edited_time")
+            str(m["last_edited_time"])
+            for m in metadatas
+            if m and m.get("last_edited_time")
         )
         print(f"Total chunks  : {len(metadatas)}")
         print(f"Distinct pages: {len(page_ids)}")
@@ -296,12 +301,14 @@ async def ingest(args: argparse.Namespace) -> None:
     # Prune chunks for pages that no longer exist in Notion
     all_chunks = collection.get(include=["metadatas"])
     indexed_ids = {
-        m["page_id"] for m in all_chunks["metadatas"] if m and "page_id" in m
+        m["page_id"] for m in all_chunks["metadatas"] or [] if m and "page_id" in m
     }
     live_ids = {p["id"] for p in pages}
     stale_ids = indexed_ids - live_ids
     if stale_ids:
-        stale_chunks = collection.get(where={"page_id": {"$in": list(stale_ids)}})
+        stale_chunks = collection.get(
+            where=cast(Where, {"page_id": {"$in": list(stale_ids)}})
+        )
         collection.delete(ids=stale_chunks["ids"])
         logger.info(
             "Pruned %d chunks for %d deleted pages",
@@ -323,9 +330,11 @@ async def ingest(args: argparse.Namespace) -> None:
                 where={"page_id": page_id},
                 include=["metadatas"],
             )
+            existing_metas = existing["metadatas"] or []
             if (
                 existing["ids"]
-                and existing["metadatas"][0].get("last_edited_time") == last_edited_time
+                and existing_metas
+                and existing_metas[0].get("last_edited_time") == last_edited_time
             ):
                 logger.debug("Page '%s' unchanged — skipping", title)
                 continue
@@ -338,9 +347,9 @@ async def ingest(args: argparse.Namespace) -> None:
 
         # Embed and upsert each chunk
         ids: list[str] = []
-        embeddings: list[list[float]] = []
+        embeddings: list[Sequence[float] | Sequence[int]] = []
         documents: list[str] = []
-        chunk_metadatas: list[dict[str, Any]] = []
+        chunk_metadatas: list[Metadata] = []
 
         for i, chunk in enumerate(chunks):
             try:

@@ -78,7 +78,7 @@ def test_init_accepts_api_key_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 async def test_chat_returns_content(llm: AzureOpenAILLM) -> None:
-    llm._client.chat.completions.create = AsyncMock(
+    llm._client.chat.completions.create = AsyncMock(  # type: ignore[method-assign]
         return_value=_make_completion("hello")
     )
 
@@ -88,7 +88,7 @@ async def test_chat_returns_content(llm: AzureOpenAILLM) -> None:
 
 
 async def test_chat_raises_runtime_error_on_api_failure(llm: AzureOpenAILLM) -> None:
-    llm._client.chat.completions.create = AsyncMock(
+    llm._client.chat.completions.create = AsyncMock(  # type: ignore[method-assign]
         side_effect=openai.APIError("fail", request=MagicMock(), body=None)
     )
 
@@ -97,7 +97,9 @@ async def test_chat_raises_runtime_error_on_api_failure(llm: AzureOpenAILLM) -> 
 
 
 async def test_chat_raises_value_error_on_empty_content(llm: AzureOpenAILLM) -> None:
-    llm._client.chat.completions.create = AsyncMock(return_value=_make_completion(""))
+    llm._client.chat.completions.create = AsyncMock(  # type: ignore[method-assign]
+        return_value=_make_completion("")
+    )
 
     with pytest.raises(ValueError, match="empty content"):
         await llm.chat("test prompt")
@@ -109,7 +111,9 @@ async def test_chat_raises_value_error_on_empty_prompt(llm: AzureOpenAILLM) -> N
 
 
 async def test_chat_raises_on_empty_choices(llm: AzureOpenAILLM) -> None:
-    llm._client.chat.completions.create = AsyncMock(return_value=MagicMock(choices=[]))
+    llm._client.chat.completions.create = AsyncMock(  # type: ignore[method-assign]
+        return_value=MagicMock(choices=[])
+    )
     with pytest.raises(ValueError, match="no choices"):
         await llm.chat("test")
 

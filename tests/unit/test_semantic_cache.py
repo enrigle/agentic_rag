@@ -140,7 +140,7 @@ async def test_get_returns_result_on_similarity_hit(
     mock_redis.scan = _make_scan_side_effect([b"cache:abc123"])
     mock_redis.hgetall.return_value = _serialise(stored, vec)
     # embed returns the same vector → cosine similarity = 1.0
-    cache._embed_llm.embed = AsyncMock(return_value=vec)
+    cache._embed_llm.embed = AsyncMock(return_value=vec)  # type: ignore[method-assign]
 
     result = await cache.get("what is X?")
 
@@ -158,7 +158,7 @@ async def test_get_returns_none_on_similarity_miss(
     orthogonal_vec = [0.0, 1.0, 0.0]  # dot product with stored_vec = 0
     mock_redis.scan = _make_scan_side_effect([b"cache:abc123"])
     mock_redis.hgetall.return_value = _serialise(stored, stored_vec)
-    cache._embed_llm.embed = AsyncMock(return_value=orthogonal_vec)
+    cache._embed_llm.embed = AsyncMock(return_value=orthogonal_vec)  # type: ignore[method-assign]
 
     result = await cache.get("unrelated query")
 
@@ -250,7 +250,7 @@ async def test_get_returns_best_match_among_multiple_keys(
 
     # query vector
     query_vec = [1.0, 0.0, 0.0]
-    cache._embed_llm.embed = AsyncMock(return_value=query_vec)
+    cache._embed_llm.embed = AsyncMock(return_value=query_vec)  # type: ignore[method-assign]
 
     # stored_low: similarity ~0.92  (slightly off-axis)
     low_vec = np.array([0.92, 0.39, 0.0], dtype=np.float32)

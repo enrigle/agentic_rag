@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional, TypeVar
 
-import yaml  # type: ignore[import-untyped]
+import yaml
 
 logger = logging.getLogger(__name__)
 

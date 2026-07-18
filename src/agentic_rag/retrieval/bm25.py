@@ -6,7 +6,7 @@ import json
 import logging
 from pathlib import Path
 
-import bm25s  # type: ignore[import-untyped]
+import bm25s
 
 from agentic_rag.config import RAGConfig
 from agentic_rag.retrieval.base import BaseKeywordRetriever
