@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from sentence_transformers import CrossEncoder
 
 
@@ -21,7 +23,9 @@ class CrossEncoderReranker:
         self._top_k = top_k
         self._min_score = min_score
 
-    def rerank(self, query: str, candidates: list[dict]) -> list[dict]:
+    def rerank(
+        self, query: str, candidates: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
         """Score (query, doc) pairs and return the top-k by descending score.
 
         Args:
@@ -41,7 +45,7 @@ class CrossEncoderReranker:
         # are kept when they all fit in top_k — skip the forward pass.
         if self._min_score is None and len(candidates) <= self._top_k:
             return candidates
-        pairs = [(query, c["content"]) for c in candidates]
+        pairs: list[Any] = [(query, c["content"]) for c in candidates]
         scores: list[float] = self._model.predict(pairs).tolist()
         ranked = sorted(zip(scores, candidates), key=lambda x: x[0], reverse=True)
         kept = [

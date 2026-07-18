@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from typing import Any
 
 from agentic_rag.config import load_config
 from agentic_rag.llm.base import BaseLLM
@@ -43,7 +44,7 @@ def _build_synth_llm() -> BaseLLM:
 async def classify_failure(
     query: str,
     answer: str,
-    sources: list[dict],
+    sources: list[dict[str, Any]],
 ) -> str:
     """Classify a thumbs-down response. Returns one of three categories or 'unknown'."""
     sources_block = (
@@ -68,7 +69,7 @@ async def classify_failure(
         if start == -1 or end == 0:
             logger.warning("judge: no JSON object found in response")
             return "unknown"
-        parsed: dict = json.loads(text[start:end])
+        parsed: dict[str, Any] = json.loads(text[start:end])
         category: str = parsed.get("category", "unknown")
         if category not in _VALID_CATEGORIES:
             logger.warning(

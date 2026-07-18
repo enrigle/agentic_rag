@@ -44,7 +44,7 @@ class ErrorHandler:
 
         tool_calls = 0
         try:
-            tool_calls = int(state["tool_calls"])  # type: ignore[index]
+            tool_calls = int(state["tool_calls"])
         except Exception:
             tool_calls = 0
 

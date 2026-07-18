@@ -7,6 +7,7 @@ import logging
 import statistics
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import yaml  # type: ignore[import-untyped]
 
@@ -66,7 +67,7 @@ def apply_optimization(
     new_min_sim = tune_retrieval_params(entries)
     if new_min_sim is not None:
         try:
-            raw: dict = yaml.safe_load(config_path.read_text()) or {}
+            raw: dict[str, Any] = yaml.safe_load(config_path.read_text()) or {}
             raw.setdefault("retriever", {})["min_similarity"] = new_min_sim
             config_path.write_text(yaml.dump(raw, default_flow_style=False))
             logger.info("optimizer: updated min_similarity to %s", new_min_sim)
