@@ -31,7 +31,7 @@ NOTION_TOKEN=secret_xxx
 
 ## Ingestion
 
-Ingestion builds ChromaDB vector index and BM25 index (`./data/bm25_index/`). Queries use both via Reciprocal Rank Fusion — BM25 catches exact keyword matches vector search can miss. Incremental mode (default) uses `last_edited_time` to skip unchanged pages, prunes deleted ones. Use `--full` after changing chunking settings.
+Ingestion builds ChromaDB vector index and BM25 index (paths set by `chroma_path` / `bm25_path` in config). Queries use both via Reciprocal Rank Fusion — BM25 catches exact keyword matches vector search can miss. Incremental mode (default) uses `last_edited_time` to skip unchanged pages, prunes deleted ones. Use `--full` after changing chunking settings.
 
 Image blocks processed with OCR (Tesseract), optionally captioned via `llava`.
 
@@ -39,52 +39,23 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for ingest commands.
 
 ## Configuration
 
-Settings live in `config/default.yaml` (local) and `config/docker.yaml` (Docker), loaded into typed dataclasses at startup:
+Settings live in [`config/default.yaml`](config/default.yaml) (local) and [`config/docker.yaml`](config/docker.yaml) (Docker: paths under `/app/data/`, host-gateway Ollama URL, `redis://redis:6379`), loaded into typed dataclasses (`src/agentic_rag/config.py`) at startup. Those files are the authoritative option list; key options:
 
 ```yaml
-chroma_path: ./data/chroma_db
-bm25_path: ./data/bm25_index
-collection_name: notion_kb
-max_tool_calls: 5
 embed_backend: ollama         # or sentence_transformers; used by both queries and ingest (always local)
-
-llm:
-  model: llama3.2
-  embed_model: nomic-embed-text
-  base_url: http://localhost:11434    # docker.yaml uses http://host.docker.internal:11434
 
 retriever:
   min_similarity: 0.50        # cosine similarity cutoff for vector candidates
-  top_n: 20                   # RRF candidates passed to reranker
-  rrf_k: 60                   # RRF damping constant
-  bm25_top_k: 10              # BM25 candidates before merge
-  reranker_model: cross-encoder/ms-marco-MiniLM-L-2-v2
+  reranker_min_score: 0.0     # cross-encoder gate; null disables (web fallthrough)
   reranker_top_k: 5           # results returned after reranking
-  few_shot_max: 3             # max thumbs-up examples injected into the prompt
 
 ingestion:
   chunk_size: 800
   chunk_overlap: 100
-  vision_model: llava         # Ollama model used for image captioning
-
-# Optional: Groq for fast cloud synthesis (falls back to Ollama if absent)
-groq:
-  model: "llama-3.1-8b-instant"
-  # api_key: set via GROQ_API_KEY env var (never in config file)
-
-# Optional: Azure OpenAI (alternative to Groq)
-azure_openai:
-  endpoint: ""                # set via AZURE_OPENAI_ENDPOINT env var
-  deployment: "gpt-4o-mini"
-  api_version: "2024-02-01"
-  # api_key: set via AZURE_OPENAI_API_KEY env var
-
-# Optional: Redis semantic cache
-redis:
-  url: "redis://localhost:6379"     # docker.yaml uses redis://redis:6379
-  ttl_seconds: 3600
-  similarity_threshold: 0.95  # cosine similarity required for a cache hit
+  vision_model: ""            # Ollama model for image captioning (e.g. llava); empty disables
 ```
+
+Optional `groq`, `azure_openai`, and `redis` sections enable cloud synthesis and semantic caching; API keys come from env vars (`GROQ_API_KEY`, `AZURE_OPENAI_API_KEY`), never the config file.
 
 ### Groq setup
 
@@ -139,8 +110,8 @@ flowchart TD
     Q -->|cache hit| RC["Redis SemanticCache\nless than 5 ms"]
     RC --> A
     Q -->|cache miss| H["HybridRetriever\nRRF merge"]
-    H -->|vector| V["ChromaDB\ndata/chroma_db/"]
-    H -->|keyword| K["BM25\ndata/bm25_index/"]
+    H -->|vector| V["ChromaDB\nchroma_path"]
+    H -->|keyword| K["BM25\nbm25_path"]
     H --> R["CrossEncoderReranker"]
     R --> S["Synthesizer\nGroq / Ollama / Azure OpenAI"]
     S -->|store result| RC
@@ -194,9 +165,9 @@ repo/
 ├── config/
 │   ├── default.yaml   # local config
 │   └── docker.yaml    # Docker config (Ollama + Redis URLs differ)
+├── chroma_db/         # ChromaDB vector index (generated; `chroma_path` in config)
+├── bm25_index/        # BM25 index (generated; `bm25_path` in config)
 ├── data/
-│   ├── chroma_db/         # ChromaDB vector index (generated)
-│   ├── bm25_index/        # BM25 index (generated)
 │   ├── feedback_config.json  # few-shot examples (auto-written by optimizer)
 │   └── feedback.db        # SQLite feedback store (gitignored)
 ├── evals/
