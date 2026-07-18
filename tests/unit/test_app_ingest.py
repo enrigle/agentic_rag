@@ -9,7 +9,7 @@ def test_run_ingest_success() -> None:
 
     with (
         patch("app.load_config", return_value=MagicMock()),
-        patch("app.OllamaLLM", return_value=MagicMock()),
+        patch("app.make_embed_llm", return_value=MagicMock()),
         patch("app.NotionIngester", return_value=mock_ingester),
     ):
         app._sync_state["status"] = "idle"

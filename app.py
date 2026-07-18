@@ -16,15 +16,14 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from agentic_rag.config import load_config
-from agentic_rag.health import run_checks
+from agentic_rag.health import ServiceStatus, run_checks
 from agentic_rag.feedback.store import FeedbackEntry, get_all, save, update_category
 from agentic_rag.feedback.judge import classify_failure
 from agentic_rag.feedback.optimizer import apply_optimization
 from agentic_rag.ingestion.notion import NotionIngester
-from agentic_rag.llm.ollama import OllamaLLM
 from agentic_rag.models import QueryResult
 from agentic_rag.pipeline.coordinator import PipelineCoordinator
-from agentic_rag.pipeline.rag_pipeline import create_pipeline
+from agentic_rag.pipeline.rag_pipeline import create_pipeline, make_embed_llm
 
 
 logger = logging.getLogger(__name__)
@@ -61,7 +60,7 @@ def _run_ingest() -> None:
     _sync_state.update({"chunks": 0, "error": ""})
     try:
         config = load_config()
-        llm = OllamaLLM(config.llm)
+        llm = make_embed_llm(config)
         ingester = NotionIngester(config, llm)
         total = asyncio.run(ingester.ingest(full=False))
         _sync_state["chunks"] = total
@@ -102,7 +101,7 @@ def _render_source(index: int, title: str, url: str) -> None:
 
 
 @st.cache_resource
-def _service_statuses() -> list:
+def _service_statuses() -> list[ServiceStatus]:
     cfg = load_config()
     return asyncio.run(
         run_checks(
@@ -119,7 +118,7 @@ def get_pipeline() -> PipelineCoordinator:
     return create_pipeline()
 
 
-def _to_result_dict(result: QueryResult) -> dict:
+def _to_result_dict(result: QueryResult) -> dict[str, Any]:
     """Convert QueryResult dataclass to the dict shape app.py renders."""
     return {
         "answer": result.answer,
@@ -140,7 +139,7 @@ def _to_result_dict(result: QueryResult) -> dict:
 
 
 @st.cache_resource
-def _conversation_store() -> dict:
+def _conversation_store() -> dict[str, list[Any]]:
     return {}
 
 
@@ -217,14 +216,14 @@ with st.sidebar:
     if st.button("Optimize", disabled=optimize_disabled, help="Requires 10+ ratings"):
         with st.spinner("Optimizing..."):
             _cfg = load_config()
-            result = apply_optimization(
+            opt_result = apply_optimization(
                 all_entries, few_shot_max=_cfg.retriever.few_shot_max
             )
         parts = []
-        if result.new_min_similarity is not None:
-            parts.append(f"min_similarity → {result.new_min_similarity}")
-        if result.few_shot_count:
-            parts.append(f"{result.few_shot_count} few-shot examples saved")
+        if opt_result.new_min_similarity is not None:
+            parts.append(f"min_similarity → {opt_result.new_min_similarity}")
+        if opt_result.few_shot_count:
+            parts.append(f"{opt_result.few_shot_count} few-shot examples saved")
         st.success(", ".join(parts) if parts else "No changes needed yet")
 
     gaps = [e.query for e in all_entries if e.category == "missing_content"]

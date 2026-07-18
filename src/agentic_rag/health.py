@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import os
+from collections.abc import Awaitable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 
 @dataclass
@@ -30,7 +32,8 @@ async def _check_redis(url: str) -> ServiceStatus:
         import redis.asyncio as aioredis
 
         r = aioredis.Redis.from_url(url)
-        await r.ping()
+        # redis-py types ping() as Awaitable[bool] | bool; asyncio client awaits.
+        await cast(Awaitable[bool], r.ping())
         await r.aclose()
         return ServiceStatus("Redis", True)
     except Exception:

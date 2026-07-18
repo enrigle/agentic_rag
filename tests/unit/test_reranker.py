@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -9,7 +10,7 @@ import pytest
 from agentic_rag.retrieval.reranker import CrossEncoderReranker
 
 
-def _make_candidates(n: int) -> list[dict]:
+def _make_candidates(n: int) -> list[dict[str, Any]]:
     return [{"id": str(i), "content": f"doc {i}", "score": 0.0} for i in range(n)]
 
 
@@ -33,14 +34,14 @@ def reranker() -> CrossEncoderReranker:
 def test_rerank_empty_candidates(reranker: CrossEncoderReranker) -> None:
     result = reranker.rerank("query", [])
     assert result == []
-    reranker._model.predict.assert_not_called()
+    reranker._model.predict.assert_not_called()  # type: ignore[attr-defined]
 
 
 def test_rerank_returns_top_k(reranker: CrossEncoderReranker) -> None:
     import numpy as np
 
     candidates = _make_candidates(5)
-    reranker._model.predict.return_value = np.array([0.1, 0.9, 0.5, 0.8, 0.3])
+    reranker._model.predict.return_value = np.array([0.1, 0.9, 0.5, 0.8, 0.3])  # type: ignore[attr-defined]
 
     result = reranker.rerank("query", candidates)
 
@@ -51,7 +52,7 @@ def test_rerank_scores_descending(reranker: CrossEncoderReranker) -> None:
     import numpy as np
 
     candidates = _make_candidates(4)
-    reranker._model.predict.return_value = np.array([0.2, 0.8, 0.5, 0.1])
+    reranker._model.predict.return_value = np.array([0.2, 0.8, 0.5, 0.1])  # type: ignore[attr-defined]
 
     result = reranker.rerank("query", candidates)
 
@@ -65,7 +66,7 @@ def test_rerank_score_field_overwritten(reranker: CrossEncoderReranker) -> None:
     # More candidates than top_k=3 so the cross-encoder actually runs.
     candidates = _make_candidates(4)
     candidates[0]["score"] = 999.0
-    reranker._model.predict.return_value = np.array([0.42, 0.1, 0.2, 0.3])
+    reranker._model.predict.return_value = np.array([0.42, 0.1, 0.2, 0.3])  # type: ignore[attr-defined]
 
     result = reranker.rerank("query", candidates)
 
@@ -81,7 +82,7 @@ def test_rerank_fewer_candidates_than_top_k(reranker: CrossEncoderReranker) -> N
 
     # Skip-guard: no forward pass needed when every candidate is kept anyway.
     assert result == candidates
-    reranker._model.predict.assert_not_called()
+    reranker._model.predict.assert_not_called()  # type: ignore[attr-defined]
 
 
 def test_rerank_min_score_drops_low_scores() -> None:
@@ -89,7 +90,7 @@ def test_rerank_min_score_drops_low_scores() -> None:
 
     gated = _make_reranker(min_score=0.0)
     candidates = _make_candidates(4)
-    gated._model.predict.return_value = np.array([-5.0, 2.0, -0.1, 0.5])
+    gated._model.predict.return_value = np.array([-5.0, 2.0, -0.1, 0.5])  # type: ignore[attr-defined]
 
     result = gated.rerank("query", candidates)
 
@@ -101,7 +102,7 @@ def test_rerank_min_score_can_return_empty() -> None:
 
     gated = _make_reranker(min_score=0.0)
     candidates = _make_candidates(3)
-    gated._model.predict.return_value = np.array([-8.0, -6.5, -9.1])
+    gated._model.predict.return_value = np.array([-8.0, -6.5, -9.1])  # type: ignore[attr-defined]
 
     result = gated.rerank("query", candidates)
 
@@ -115,9 +116,9 @@ def test_rerank_min_score_disables_skip_guard() -> None:
     # it must run so irrelevant docs can be dropped.
     gated = _make_reranker(min_score=0.0)
     candidates = _make_candidates(2)
-    gated._model.predict.return_value = np.array([1.0, -1.0])
+    gated._model.predict.return_value = np.array([1.0, -1.0])  # type: ignore[attr-defined]
 
     result = gated.rerank("query", candidates)
 
-    gated._model.predict.assert_called_once()
+    gated._model.predict.assert_called_once()  # type: ignore[attr-defined]
     assert [r["id"] for r in result] == ["0"]
