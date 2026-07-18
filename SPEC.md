@@ -15,8 +15,8 @@ citations.
 
 **Core properties:**
 
-- Embeddings are always local (Ollama). Cloud LLMs are used only for synthesis, never for privacy-
-  sensitive embedding.
+- Embeddings are always local (Ollama or sentence-transformers, per `embed_backend`). Cloud LLMs
+  are used only for synthesis, never for privacy-sensitive embedding.
 - The system is entirely async (`asyncio`).
 - All external dependencies (Redis, Ollama, Tavily, Langfuse) fail open — the pipeline degrades
   gracefully rather than crashing.
@@ -32,7 +32,7 @@ citations.
 | Package manager | `uv` | `pyproject.toml`, `uv.lock` |
 | Vector DB | ChromaDB (persistent) | cosine space, local on-disk |
 | Keyword search | `bm25s` | Saved to disk; rebuilt after every ingestion |
-| Embeddings | Ollama (`nomic-embed-text`) | Local, never sent to cloud |
+| Embeddings | Ollama (`nomic-embed-text`) or sentence-transformers | Selected by `embed_backend`; local, never sent to cloud |
 | Synthesis (default) | Ollama (`llama3.2`) | Local fallback |
 | Synthesis (fast) | Groq (`llama-3.1-8b-instant`) | Cloud; enabled via `GROQ_API_KEY` |
 | Synthesis (enterprise) | Azure OpenAI (`gpt-4o-mini`) | Cloud; enabled via endpoint + key |
@@ -70,7 +70,8 @@ agentic_rag/
 │   │   └── notion.py        # NotionIngester: Notion → ChromaDB + BM25
 │   ├── llm/
 │   │   ├── base.py          # BaseLLM (abstract: chat + embed)
-│   │   ├── ollama.py        # OllamaLLM — local, used for embeddings always
+│   │   ├── ollama.py        # OllamaLLM — local; default embed backend
+│   │   ├── sentence_transformers_llm.py  # SentenceTransformersLLM — embed-only backend
 │   │   └── openai_compat.py # OpenAICompatLLM base + AzureOpenAILLM + GroqLLM
 │   ├── observability/
 │   │   └── langfuse.py      # observation() context manager + score_trace()
@@ -82,7 +83,7 @@ agentic_rag/
 │   │   └── synthesizer.py   # Synthesizer: formats prompt + calls LLM
 │   ├── retrieval/
 │   │   ├── base.py          # BaseVectorStore + BaseKeywordRetriever protocols
-│   │   ├── bm25.py          # BM25Retriever (loads saved bm25s index)
+│   │   ├── bm25.py          # BM25Retriever (loads saved bm25s index; reloads if rebuilt on disk)
 │   │   ├── chroma.py        # ChromaVectorStore
 │   │   ├── hybrid.py        # HybridRetriever: RRF merge of vector + BM25
 │   │   └── reranker.py      # CrossEncoderReranker
@@ -193,8 +194,11 @@ otherwise                → OllamaLLM for synthesis (same as embeddings)
 missing credentials. That is exception-driven control flow — slow and unpredictable. `is_configured()`
 checks env vars + config fields directly.
 
-**Embeddings always use OllamaLLM** regardless of which synthesis provider is active.
-`OpenAICompatLLM.embed()` raises `NotImplementedError` by design — embeddings must stay local.
+**Embeddings are always local**, regardless of which synthesis provider is active.
+`make_embed_llm()` selects the backend from `embed_backend`: `OllamaLLM` (default) or
+`SentenceTransformersLLM`. It is shared by the pipeline and the in-app ingest so both sides
+write and query vectors in the same embedding space. `OpenAICompatLLM.embed()` raises
+`NotImplementedError` by design — embeddings must stay local.
 
 ---
 
@@ -207,9 +211,11 @@ checks env vars + config fields directly.
 2. Prune chunks for pages deleted from Notion (diff indexed page IDs vs live IDs).
 3. For each changed page (detected via `last_edited_time`): fetch block tree recursively up to depth 10.
 4. Chunk text with `_chunk_text()` (size=800, overlap=100 by default).
-5. Embed each chunk with `OllamaLLM.embed()`.
+5. Embed each chunk with the configured embed LLM (`make_embed_llm()` — see §5.3).
 6. Delete existing chunks for the page, then upsert new ones into ChromaDB.
-7. After all pages: rebuild BM25 index from all ChromaDB documents and save to disk.
+7. After all pages: rebuild BM25 index from all ChromaDB documents via `BM25Retriever.rebuild()`
+   (saves to disk; live retrievers detect the rewrite via `id_map.json` mtime and reload on next
+   `search()` — no process restart needed after an in-app sync).
 
 Image blocks: if `ingestion.vision_model` is set, download and caption via Ollama vision model
 (e.g. `llava`). Uses `ollama.AsyncClient` directly — not `BaseLLM` — because `BaseLLM.embed()` does
@@ -439,7 +445,7 @@ RAG_CONFIG_PATH       Config file override (set by Docker Compose automatically)
 ### Add a new ingestion source
 
 1. Implement `BaseIngester` protocol (`async ingest() -> int`, `status() -> dict`).
-2. After ingestion, call `_rebuild_bm25()` or its equivalent to keep BM25 in sync.
+2. After ingestion, call `BM25Retriever.rebuild()` to keep BM25 in sync.
 
 ### Add a new vector store
 
@@ -461,8 +467,10 @@ The `feedback/optimizer.py` auto-tunes `min_similarity` from thumbs-up/down sign
 
 ## 16. Key Invariants
 
-- **Embeddings never leave the machine.** `OllamaLLM` is always used for `embed()`.
-  `OpenAICompatLLM.embed()` raises `NotImplementedError` by design.
+- **Embeddings never leave the machine.** `make_embed_llm()` only returns local backends
+  (`OllamaLLM` or `SentenceTransformersLLM`), and the pipeline and in-app ingest share it so
+  both use the same embedding space. `OpenAICompatLLM.embed()` raises `NotImplementedError`
+  by design.
 - **Sources are ordered.** `RAGSource` always runs before `WebSource`. The first non-empty result
   wins. Order in `create_pipeline()` is `[RAGSource, WebSource]`.
 - **Cache failures are invisible.** `SemanticCache._available = False` after first error; all
