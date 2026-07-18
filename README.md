@@ -46,6 +46,7 @@ chroma_path: ./data/chroma_db
 bm25_path: ./data/bm25_index
 collection_name: notion_kb
 max_tool_calls: 5
+embed_backend: ollama         # or sentence_transformers; used by both queries and ingest (always local)
 
 llm:
   model: llama3.2
