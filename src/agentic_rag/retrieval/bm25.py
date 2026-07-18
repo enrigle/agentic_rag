@@ -6,7 +6,7 @@ import json
 import logging
 from pathlib import Path
 
-import bm25s  # type: ignore[import-untyped]
+import bm25s
 
 from agentic_rag.config import RAGConfig
 from agentic_rag.retrieval.base import BaseKeywordRetriever
@@ -21,6 +21,7 @@ class BM25Retriever(BaseKeywordRetriever):
         self._bm25_path = Path(config.bm25_path)
         self._retriever: bm25s.BM25 | None = None
         self._ids: list[str] = []
+        self._loaded_mtime: float | None = None
         self._load()
 
     # ------------------------------------------------------------------
@@ -40,6 +41,7 @@ class BM25Retriever(BaseKeywordRetriever):
         try:
             self._retriever = bm25s.BM25.load(str(self._bm25_path), load_corpus=False)
             self._ids = json.loads(id_map_path.read_text())
+            self._loaded_mtime = id_map_path.stat().st_mtime
             logger.info("BM25 index loaded: %d documents", len(self._ids))
         except Exception as exc:
             logger.warning(
@@ -49,6 +51,22 @@ class BM25Retriever(BaseKeywordRetriever):
             )
             self._retriever = None
             self._ids = []
+            self._loaded_mtime = None
+
+    def _reload_if_changed(self) -> None:
+        """Re-read the index when ingest rewrote it on disk since our last load.
+
+        The Streamlit app rebuilds the BM25 index in a background ingest thread
+        while this (cached) retriever stays alive, so a one-time load in
+        __init__ would serve stale keyword results until process restart.
+        """
+        id_map_path = self._bm25_path / "id_map.json"
+        try:
+            mtime = id_map_path.stat().st_mtime
+        except OSError:
+            return  # index absent — keep whatever we have (possibly nothing)
+        if mtime != self._loaded_mtime:
+            self._load()
 
     # ------------------------------------------------------------------
     # BaseKeywordRetriever interface
@@ -64,6 +82,7 @@ class BM25Retriever(BaseKeywordRetriever):
         Returns:
             Ordered list of doc IDs, or [] if the index is not loaded.
         """
+        self._reload_if_changed()
         if self._retriever is None or not self._ids:
             return []
 
@@ -101,10 +120,12 @@ class BM25Retriever(BaseKeywordRetriever):
 
         self._bm25_path.mkdir(parents=True, exist_ok=True)
         retriever.save(str(self._bm25_path))
-        (self._bm25_path / "id_map.json").write_text(json.dumps(ids))
+        id_map_path = self._bm25_path / "id_map.json"
+        id_map_path.write_text(json.dumps(ids))
 
         self._retriever = retriever
         self._ids = list(ids)
+        self._loaded_mtime = id_map_path.stat().st_mtime
         logger.info(
             "BM25Retriever.rebuild: indexed and saved %d documents", len(documents)
         )

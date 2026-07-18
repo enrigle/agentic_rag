@@ -23,7 +23,7 @@ def get_client() -> Any | None:
     if not langfuse_enabled():
         return None
     try:
-        from langfuse import Langfuse  # type: ignore[import-not-found]
+        from langfuse import Langfuse
 
         kwargs: dict[str, Any] = {
             "public_key": os.getenv("LANGFUSE_PUBLIC_KEY"),

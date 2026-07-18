@@ -13,6 +13,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Changed
 - `[tool.ruff.lint.per-file-ignores]` added to `pyproject.toml` — suppresses E402 for `app.py` (intentional logging-before-imports pattern)
 
+### Fixed
+- **In-app Sync embeds with the configured backend** — `app.py` now uses `make_embed_llm()` (shared with `create_pipeline()`) instead of hardcoding `OllamaLLM`, so ingest and queries always share one embedding space
+- **BM25 index reloads without restart** — `BM25Retriever.search()` detects when ingest rewrote the on-disk index (via `id_map.json` mtime) and reloads it; keyword search picks up newly synced documents in the running app. `NotionIngester` now delegates the rebuild to `BM25Retriever.rebuild()`
+
 ## [0.9.0] - 2026-05-09
 
 ### Added
