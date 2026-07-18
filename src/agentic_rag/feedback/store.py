@@ -7,6 +7,7 @@ import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 DB_PATH = Path("data/feedback.db")
 
@@ -29,7 +30,7 @@ CREATE TABLE IF NOT EXISTS feedback (
 class FeedbackEntry:
     query: str
     answer: str
-    sources: list[dict]  # [{title, content, score}]
+    sources: list[dict[str, Any]]  # [{title, content, score}]
     top_score: float
     rating: int  # 1 = thumbs up, -1 = thumbs down
     note: str = ""
