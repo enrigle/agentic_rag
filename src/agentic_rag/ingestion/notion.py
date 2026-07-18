@@ -2,14 +2,11 @@
 
 import asyncio
 import functools
-import json
 import logging
 import os
 import urllib.request
-from pathlib import Path
 from typing import Any, Mapping
 
-import bm25s  # type: ignore[import-untyped]
 import chromadb
 import ollama
 from dotenv import load_dotenv
@@ -24,6 +21,7 @@ from agentic_rag.ingestion.chunker import (
     _get_title,
 )
 from agentic_rag.llm.base import BaseLLM
+from agentic_rag.retrieval.bm25 import BM25Retriever
 
 logger = logging.getLogger(__name__)
 
@@ -219,14 +217,7 @@ class NotionIngester(BaseIngester):
         if not documents:
             logger.warning("BM25: collection is empty — skipping index build")
             return
-        tokenized = bm25s.tokenize(documents, show_progress=False)
-        retriever = bm25s.BM25()
-        retriever.index(tokenized, show_progress=False)
-        bm25_path = Path(self._config.bm25_path)
-        bm25_path.mkdir(exist_ok=True)
-        retriever.save(str(bm25_path))
-        (bm25_path / "id_map.json").write_text(json.dumps(ids))
-        logger.info("BM25 index saved: %d documents", len(documents))
+        BM25Retriever(self._config).rebuild(ids, documents)
 
     async def _caption_image(
         self, ollama_client: ollama.AsyncClient | None, url: str
