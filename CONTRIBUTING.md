@@ -1,44 +1,8 @@
 # Contributing
 
-## Running Locally
+## Running the app
 
-```bash
-cp .env.example .env   # add NOTION_TOKEN
-uv sync
-ollama serve           # separate terminal
-uv run streamlit run app.py
-```
-
-App runs at `http://localhost:8501`. ChromaDB embedded — no separate server needed.
-
-### Ingest (local)
-
-```bash
-uv run python scripts/ingest.py           # incremental
-uv run python scripts/ingest.py --full    # force re-embed everything
-uv run python scripts/ingest.py --status  # print stats
-```
-
-## Running with Docker
-
-Ollama run on host — container reaches via `host.docker.internal:11434`.
-
-```bash
-cp .env.example .env   # add NOTION_TOKEN
-docker compose up --build
-```
-
-App runs at `http://localhost:8502`. Redis included, wired automatically.
-
-### Ingest (Docker)
-
-```bash
-docker compose exec app uv run python scripts/ingest.py
-docker compose exec app uv run python scripts/ingest.py --full
-docker compose exec app uv run python scripts/ingest.py --status
-```
-
-Data written to `./data/` on host (mounted volume), persists across restarts.
+See [README → Quickstart](README.md#quickstart) for local and Docker setup, run, and ingest commands.
 
 ## Development
 
