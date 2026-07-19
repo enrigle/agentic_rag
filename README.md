@@ -11,7 +11,53 @@ Local agentic RAG system using Ollama (llama3.2) + Notion knowledge base. Option
 - **Azure OpenAI** *(optional)* — alternative cloud LLM; set `AZURE_OPENAI_API_KEY` + endpoint in `.env`
 - **Redis** *(optional)* — semantic cache; hits return in < 5 ms (`brew install redis && brew services start redis` on macOS)
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and run instructions.
+## Quickstart
+
+### 0. Setup (both modes)
+
+```bash
+git clone https://github.com/enrigle/agentic_rag.git
+cd agentic_rag
+cp .env.example .env                             # then set NOTION_TOKEN (see Notion setup below)
+ollama pull llama3.2 && ollama pull nomic-embed-text
+```
+
+Ollama always runs on the host — start it if it isn't running:
+
+```bash
+ollama serve   # separate terminal
+```
+
+### Option A — local
+
+```bash
+uv sync
+uv run streamlit run app.py
+```
+
+App at `http://localhost:8501`. ChromaDB is embedded — no separate server. Redis optional (`brew install redis && brew services start redis`); without it the app runs with caching disabled.
+
+### Option B — Docker
+
+```bash
+docker compose up --build
+```
+
+App at `http://localhost:8502` (bound to loopback only — the app has no auth). Redis is included and wired automatically; the container reaches host Ollama via `host.docker.internal:11434`. Config comes from `config/docker.yaml`; index data persists in `./data/` on the host.
+
+### First run
+
+On launch the app starts an incremental Notion ingest in the background — the sidebar shows `⟳ Syncing...` then `✓ Synced · N chunks indexed`. Until sync finishes, answers may come from web search only. You can also ingest manually:
+
+```bash
+# local
+uv run python scripts/ingest.py            # incremental
+uv run python scripts/ingest.py --full     # force re-embed everything
+uv run python scripts/ingest.py --status   # print index stats
+
+# Docker
+docker compose exec app uv run python scripts/ingest.py
+```
 
 ---
 
@@ -35,7 +81,7 @@ Ingestion builds ChromaDB vector index and BM25 index (paths set by `chroma_path
 
 Image blocks processed with OCR (Tesseract), optionally captioned via `llava`.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for ingest commands.
+Ingest commands are in [Quickstart → First run](#first-run).
 
 ## Configuration
 
