@@ -16,8 +16,11 @@ retriever:
   bm25_top_k: 10
   reranker_model: cross-encoder/ms-marco-MiniLM-L-2-v2
   reranker_top_k: 5
-  # cross-encoder logits: >= 0 ~ relevant; null disables gate (web fallthrough)
-  reranker_min_score: 0.0
+  # Cross-encoder gate over raw logits; null disables (reranker only reorders).
+  # ms-marco-MiniLM-L-2-v2 scores personal-notes content negative across the
+  # board (real matches land at -1..-9), so any threshold >= 0 silently drops
+  # every KB result and forces web fallthrough.
+  reranker_min_score: null
   few_shot_max: 3
 
 ingestion:
