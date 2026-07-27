@@ -16,11 +16,14 @@ retriever:
   bm25_top_k: 10
   reranker_model: cross-encoder/ms-marco-MiniLM-L-2-v2
   reranker_top_k: 5
-  # Cross-encoder gate over raw logits; null disables (reranker only reorders).
-  # ms-marco-MiniLM-L-2-v2 scores personal-notes content negative across the
-  # board (real matches land at -1..-9), so any threshold >= 0 silently drops
-  # every KB result and forces web fallthrough.
-  reranker_min_score: null
+  # Cross-encoder gate over raw logits; null disables it entirely (reranker
+  # only reorders, never drops), which lets off-topic queries stick to
+  # whatever noise crossed min_similarity instead of falling through to web.
+  # ms-marco-MiniLM-L-2-v2 on this corpus: real matches score -1..-7,
+  # off-topic queries score -10..-12 — empirically calibrated on this KB,
+  # not a general constant. Re-check this gap if reranker_model or the
+  # corpus domain changes.
+  reranker_min_score: -8.0
   few_shot_max: 3
 
 ingestion:
