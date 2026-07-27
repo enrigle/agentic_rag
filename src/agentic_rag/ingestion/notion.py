@@ -143,8 +143,12 @@ class NotionIngester(BaseIngester):
             chunk_metadatas: list[dict[str, Any]] = []
 
             for i, chunk in enumerate(chunks):
+                # Prepend the page title so it is searchable by both vector and
+                # BM25 (which index the stored document). Without this, a page
+                # is invisible to queries that use its name.
+                doc_text = f"{title}\n\n{chunk}"
                 try:
-                    vector: list[float] = await self._llm.embed(chunk)
+                    vector: list[float] = await self._llm.embed(doc_text)
                 except Exception as exc:
                     logger.warning(
                         "Embedding failed for chunk %d of '%s': %s", i, title, exc
@@ -153,7 +157,7 @@ class NotionIngester(BaseIngester):
 
                 ids.append(f"{page_id}_chunk_{i}")
                 embeddings.append(vector)
-                documents.append(chunk)
+                documents.append(doc_text)
                 chunk_metadatas.append(
                     {
                         "title": title,

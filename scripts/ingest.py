@@ -352,8 +352,11 @@ async def ingest(args: argparse.Namespace) -> None:
         chunk_metadatas: list[Metadata] = []
 
         for i, chunk in enumerate(chunks):
+            # Prepend the page title so it is searchable by both vector and BM25
+            # (which index the stored document). Must match NotionIngester.ingest.
+            doc_text = f"{title}\n\n{chunk}"
             try:
-                vector: list[float] = await embed_llm.embed(chunk)
+                vector: list[float] = await embed_llm.embed(doc_text)
             except Exception as exc:
                 logger.warning(
                     "Embedding failed for chunk %d of '%s': %s", i, title, exc
@@ -362,7 +365,7 @@ async def ingest(args: argparse.Namespace) -> None:
 
             ids.append(f"{page_id}_chunk_{i}")
             embeddings.append(vector)
-            documents.append(chunk)
+            documents.append(doc_text)
             chunk_metadatas.append(
                 {
                     "title": title,
