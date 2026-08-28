@@ -1,6 +1,13 @@
 # app.py
 import logging
+import os
 import asyncio
+
+# transformers resets its own logger level to WARNING when first imported,
+# overriding any setLevel() below; it honors this env var at that reset. Must be
+# set before transformers is imported (via sentence_transformers downstream).
+# docker-compose sets it too; this covers local runs. setdefault → env wins.
+os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
 
 logging.getLogger("streamlit.watcher.local_sources_watcher").setLevel(logging.ERROR)
 logging.getLogger("transformers").setLevel(logging.ERROR)
