@@ -24,7 +24,7 @@ ingestion:
   vision_model: ""
 
 groq:
-  model: "llama-3.1-8b-instant"
+  model: "openai/gpt-oss-20b"
 
 azure_openai:
   endpoint: ""

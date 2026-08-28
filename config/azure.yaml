@@ -29,7 +29,7 @@ azure_openai:
   api_version: "2024-11-01-preview"
 
 groq:
-  model: "llama-3.1-8b-instant"
+  model: "openai/gpt-oss-20b"
 
 redis:
   url: "rediss://YOUR-CACHE.redis.cache.windows.net:6380"

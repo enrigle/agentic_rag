@@ -49,7 +49,7 @@ class IngestionConfig:
 
 @dataclass
 class GroqConfig:
-    model: str = "llama-3.1-8b-instant"
+    model: str = "openai/gpt-oss-20b"
     api_key: Optional[str] = None
 
     def is_configured(self) -> bool:

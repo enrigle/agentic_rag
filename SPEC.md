@@ -34,7 +34,7 @@ citations.
 | Keyword search | `bm25s` | Saved to disk; rebuilt after every ingestion |
 | Embeddings | Ollama (`nomic-embed-text`) or sentence-transformers | Selected by `embed_backend`; local, never sent to cloud |
 | Synthesis (default) | Ollama (`llama3.2`) | Local fallback |
-| Synthesis (fast) | Groq (`llama-3.1-8b-instant`) | Cloud; enabled via `GROQ_API_KEY` |
+| Synthesis (fast) | Groq (`openai/gpt-oss-20b`) | Cloud; enabled via `GROQ_API_KEY` |
 | Synthesis (enterprise) | Azure OpenAI (`gpt-4o-mini`) | Cloud; enabled via endpoint + key |
 | Reranker | `cross-encoder/ms-marco-MiniLM-L-2-v2` | sentence-transformers |
 | Cache | Redis 7 (semantic, embedding-based) | Fails open when unreachable |
