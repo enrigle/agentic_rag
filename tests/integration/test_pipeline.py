@@ -28,7 +28,9 @@ def _make_mock_source(
 def _identity_reranker() -> MagicMock:
     """Reranker mock that passes candidates through unchanged (no gate)."""
     reranker = MagicMock(spec=CrossEncoderReranker)
-    reranker.rerank = MagicMock(side_effect=lambda query, candidates: candidates)
+    reranker.rerank = MagicMock(
+        side_effect=lambda query, candidates, min_score=None: candidates
+    )
     return reranker
 
 
@@ -193,7 +195,7 @@ async def test_query_falls_through_when_reranker_gates_out_first_source(
     reranker = MagicMock(spec=CrossEncoderReranker)
     # Gate empties the RAG results; web results pass through.
     reranker.rerank = MagicMock(
-        side_effect=lambda query, candidates: (
+        side_effect=lambda query, candidates, min_score=None: (
             [] if candidates == rag_results else candidates
         )
     )
@@ -209,6 +211,12 @@ async def test_query_falls_through_when_reranker_gates_out_first_source(
     result = await coordinator.query("what's the temperature in madrid")
     second_source.search.assert_called_once()
     assert [s.id for s in result.sources] == ["2"]
+    # Terminal (web) source must be reranked with the gate disabled; its
+    # KB-calibrated threshold would otherwise drop web-answerable results.
+    web_call = next(
+        c for c in reranker.rerank.call_args_list if c.args[1] == web_results
+    )
+    assert web_call.kwargs["min_score"] is None
 
 
 @pytest.mark.asyncio

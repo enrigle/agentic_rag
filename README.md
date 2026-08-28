@@ -92,7 +92,7 @@ embed_backend: ollama         # or sentence_transformers; used by both queries a
 
 retriever:
   min_similarity: 0.50        # cosine similarity cutoff for vector candidates
-  reranker_min_score: 0.0     # cross-encoder gate; null disables (web fallthrough)
+  reranker_min_score: -8.0    # cross-encoder gate (KB-calibrated); null disables
   reranker_top_k: 5           # results returned after reranking
 
 ingestion:
