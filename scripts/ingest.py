@@ -376,6 +376,13 @@ async def ingest(args: argparse.Namespace) -> None:
             )
 
         if ids:
+            # Delete existing chunks for this page before upserting. Upsert only
+            # overwrites matching ids, so a page edited to produce fewer chunks
+            # would otherwise leave stale higher-index chunks orphaned in the
+            # index. Matches NotionIngester.ingest.
+            existing_for_page = collection.get(where={"page_id": page_id})
+            if existing_for_page["ids"]:
+                collection.delete(ids=existing_for_page["ids"])
             collection.upsert(
                 ids=ids,
                 embeddings=embeddings,

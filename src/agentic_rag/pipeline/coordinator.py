@@ -12,7 +12,7 @@ from agentic_rag.pipeline.memory import ConversationMemory
 from agentic_rag.pipeline.sources import BaseSource
 from agentic_rag.pipeline.synthesizer import Synthesizer
 from agentic_rag.cache.semantic_cache import SemanticCache
-from agentic_rag.retrieval.reranker import CrossEncoderReranker
+from agentic_rag.retrieval.reranker import _USE_CONFIGURED, CrossEncoderReranker
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +78,15 @@ class PipelineCoordinator:
                     # Rerank per source: the cross-encoder relevance gate can
                     # empty the list, letting off-topic queries fall through
                     # to the next source (e.g. web) instead of stopping here.
-                    relevant = self._reranker.rerank(user_query, new_results)
+                    # The gate is calibrated on the KB corpus, so disable it for
+                    # the terminal source — it has no fallback, and dropping its
+                    # results there means a web-answerable query returns nothing.
+                    is_terminal = source is self._sources[-1]
+                    relevant = self._reranker.rerank(
+                        user_query,
+                        new_results,
+                        min_score=None if is_terminal else _USE_CONFIGURED,
+                    )
                     if relevant:
                         logger.info(
                             "%s: %d relevant results, stopping",
