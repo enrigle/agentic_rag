@@ -1,404 +1,46 @@
-"""Notion → ChromaDB ingestion script.
+"""Notion → ChromaDB ingestion CLI.
 
 Usage:
     export NOTION_TOKEN=secret_xxx
-    uv run python ingest.py              # incremental (skip unchanged, prune deleted)
-    uv run python ingest.py --full       # force full re-index
-    uv run python ingest.py --status     # print collection stats and exit
+    uv run python scripts/ingest.py              # incremental (skip unchanged, prune deleted)
+    uv run python scripts/ingest.py --full       # force full re-index
+    uv run python scripts/ingest.py --status     # print collection stats and exit
+
+Thin wrapper around NotionIngester so the CLI and the app's background ingest
+share one implementation (chunking, embedding, image OCR/captioning, BM25).
 """
 
 import argparse
 import asyncio
-import json
 import logging
-import os
-import sys
-import urllib.request
-from collections.abc import Sequence
-from pathlib import Path
-from typing import Any, cast
 
 from dotenv import load_dotenv
 
 load_dotenv()  # loads .env from cwd (or any parent dir)
 
-import io
-
-import bm25s
-import chromadb
-import pytesseract
-from chromadb.api.types import Metadata, Where
-from PIL import Image
-from notion_client import AsyncClient
-from notion_client.helpers import async_collect_paginated_api
-
 from agentic_rag.config import load_config
-from agentic_rag.ingestion.notion import INDEX_DOC_FORMAT
-from agentic_rag.llm.base import BaseLLM
+from agentic_rag.ingestion.notion import NotionIngester
+from agentic_rag.pipeline.rag_pipeline import make_embed_llm
 
 logger = logging.getLogger(__name__)
 
-# Block types that contain rich_text content worth indexing
-RICH_TEXT_BLOCK_TYPES = {
-    "paragraph",
-    "heading_1",
-    "heading_2",
-    "heading_3",
-    "bulleted_list_item",
-    "numbered_list_item",
-    "code",
-    "quote",
-    "toggle",
-    "callout",
-}
-
-HEADING_BLOCK_TYPES = {"heading_1", "heading_2", "heading_3"}
-
-
-def _extract_plain_text(block: dict[str, Any]) -> str:
-    """Return plain text from a block's rich_text array, or empty string."""
-    block_type = block.get("type", "")
-    if block_type not in RICH_TEXT_BLOCK_TYPES:
-        return ""
-    rich_texts: list[dict[str, Any]] = block.get(block_type, {}).get("rich_text", [])
-    return "".join(rt.get("plain_text", "") for rt in rich_texts)
-
-
-def _get_title(page: dict[str, Any]) -> str:
-    """Extract page title from Notion page properties."""
-    for prop in page.get("properties", {}).values():
-        if prop.get("type") == "title":
-            rich_texts = prop.get("title", [])
-            return "".join(rt.get("plain_text", "") for rt in rich_texts)
-    return "Untitled"
-
-
-def _emit_chunk(chunks: list[str], heading: str, paras: list[str]) -> None:
-    prefix = f"{heading}\n" if heading else ""
-    chunks.append(prefix + "\n".join(paras))
-
-
-def _chunk_text(
-    blocks: list[dict[str, str]],
-    size: int = 800,
-    overlap: int = 100,
-) -> list[str]:
-    """Paragraph-aware chunking that prepends the last seen heading to each chunk.
-
-    Splits on paragraph boundaries first. Falls back to word-boundary
-    character-splitting only for paragraphs that exceed ``size`` on their own.
-    The most recent heading is prepended to every chunk so the LLM always has
-    section context.
-    """
-    if not blocks:
-        return []
-
-    # Build (heading_context, paragraph_text) pairs
-    tagged: list[tuple[str, str]] = []
-    current_heading = ""
-    for block in blocks:
-        block_type = block["type"]
-        text = block["text"].strip()
-        if not text:
-            continue
-        if block_type in HEADING_BLOCK_TYPES:
-            current_heading = text
-        else:
-            tagged.append((current_heading, text))
-
-    if not tagged:
-        return []
-
-    chunks: list[str] = []
-    buf_paras: list[str] = []
-    buf_heading = ""
-    buf_len = 0
-
-    for heading, para in tagged:
-        if heading:
-            buf_heading = heading
-
-        # Oversized single paragraph: flush buffer then character-split the para
-        if len(para) > size:
-            if buf_paras:
-                _emit_chunk(chunks, buf_heading, buf_paras)
-                buf_paras = []
-                buf_len = 0
-            start = 0
-            while start < len(para):
-                end = start + size
-                if end < len(para):
-                    space = para.rfind(" ", start, end)
-                    if space > start:
-                        end = space
-                sub = para[start:end].strip()
-                if sub:
-                    _emit_chunk(chunks, buf_heading, [sub])
-                start = max(start + 1, end - overlap)
-            continue
-
-        # Adding this paragraph would exceed the size limit: flush first
-        if buf_paras and buf_len + len(para) + 1 > size:
-            _emit_chunk(chunks, buf_heading, buf_paras)
-            # Carry the last paragraph forward as overlap context
-            last = buf_paras[-1]
-            buf_paras = [last] if len(last) + len(para) + 1 <= size else []
-            buf_len = len(buf_paras[0]) if buf_paras else 0
-
-        buf_paras.append(para)
-        buf_len = sum(len(p) for p in buf_paras) + max(0, len(buf_paras) - 1)
-
-    if buf_paras:
-        _emit_chunk(chunks, buf_heading, buf_paras)
-
-    return chunks
-
-
-def _caption_image(url: str) -> str:
-    """Download image and extract visible text via OCR."""
-    try:
-        with urllib.request.urlopen(url, timeout=10) as resp:
-            image_bytes = resp.read()
-        image = Image.open(io.BytesIO(image_bytes))
-        text: str = pytesseract.image_to_string(image)
-        return text.strip()
-    except Exception as exc:
-        logger.warning("Image captioning failed (%s): %s", url, exc)
-        return ""
-
-
-async def _fetch_text_from_blocks(
-    notion: AsyncClient,
-    block_id: str,
-    depth: int = 0,
-    max_depth: int = 10,
-) -> list[dict[str, str]]:
-    """Recursively extract typed text blocks from all Notion blocks.
-
-    Returns a list of ``{"type": block_type, "text": plain_text}`` dicts so
-    that callers can distinguish headings from body text when chunking.
-    """
-    if depth > max_depth:
-        return []
-
-    try:
-        blocks: list[dict[str, Any]] = await async_collect_paginated_api(
-            notion.blocks.children.list,
-            block_id=block_id,
-        )
-    except Exception as exc:
-        logger.warning("Could not fetch blocks for %s: %s", block_id, exc)
-        return []
-
-    typed_lines: list[dict[str, str]] = []
-    for block in blocks:
-        block_type = block.get("type", "")
-
-        text = _extract_plain_text(block)
-        if text.strip():
-            typed_lines.append({"type": block_type, "text": text})
-
-        if block_type == "image":
-            img = block.get("image", {})
-            url = img.get("file", {}).get("url") or img.get("external", {}).get(
-                "url", ""
-            )
-            if url:
-                caption = _caption_image(url)
-                if caption:
-                    typed_lines.append(
-                        {"type": "paragraph", "text": f"[Image: {caption}]"}
-                    )
-            continue
-
-        # child_page: add title as a reference but skip recursing
-        # (child pages are indexed separately via notion.search())
-        if block_type == "child_page":
-            child_title = block.get("child_page", {}).get("title", "")
-            if child_title:
-                typed_lines.append(
-                    {"type": "paragraph", "text": f"[Sub-page: {child_title}]"}
-                )
-            continue
-
-        # child_database: skip content, just note its existence
-        if block_type == "child_database":
-            continue
-
-        # Recursively fetch nested children (toggles, callouts, nested lists, etc.)
-        if block.get("has_children"):
-            child_blocks = await _fetch_text_from_blocks(
-                notion, block["id"], depth + 1, max_depth
-            )
-            typed_lines.extend(child_blocks)
-
-    return typed_lines
-
-
-def _rebuild_bm25(collection: chromadb.Collection, bm25_path: str) -> None:
-    """Rebuild BM25 index from all documents in the collection."""
-    all_docs = collection.get(include=["documents"])
-    ids: list[str] = all_docs["ids"] or []
-    documents: list[str] = all_docs["documents"] or []
-    if not documents:
-        logger.warning("BM25: collection is empty — skipping index build")
-        return
-    tokenized = bm25s.tokenize(documents, show_progress=False)
-    retriever = bm25s.BM25()
-    retriever.index(tokenized, show_progress=False)
-    Path(bm25_path).mkdir(exist_ok=True)
-    retriever.save(bm25_path)
-    (Path(bm25_path) / "id_map.json").write_text(json.dumps(ids))
-    logger.info("BM25 index saved: %d documents", len(documents))
-
 
 async def ingest(args: argparse.Namespace) -> None:
-    token = os.environ.get("NOTION_TOKEN")
-    if not token:
-        logger.error("NOTION_TOKEN env var is not set")
-        sys.exit(1)
-
-    cfg = load_config()
-    chroma = chromadb.PersistentClient(path=cfg.chroma_path)
-    collection = chroma.get_or_create_collection(
-        name=cfg.collection_name,
-        metadata={"hnsw:space": "cosine"},
-    )
+    config = load_config()
+    ingester = NotionIngester(config, make_embed_llm(config))
 
     if args.status:
-        all_chunks = collection.get(include=["metadatas"])
-        metadatas = all_chunks["metadatas"] or []
-        page_ids = {m["page_id"] for m in metadatas if m and "page_id" in m}
-        times = sorted(
-            str(m["last_edited_time"])
-            for m in metadatas
-            if m and m.get("last_edited_time")
-        )
-        print(f"Total chunks  : {len(metadatas)}")
-        print(f"Distinct pages: {len(page_ids)}")
-        if times:
-            print(f"Oldest edit   : {times[0]}")
-            print(f"Newest edit   : {times[-1]}")
+        stats = ingester.status()
+        print(f"Total chunks  : {stats['total_chunks']}")
+        print(f"Distinct pages: {stats['distinct_pages']}")
+        if stats["oldest_edit"]:
+            print(f"Oldest edit   : {stats['oldest_edit']}")
+        if stats["newest_edit"]:
+            print(f"Newest edit   : {stats['newest_edit']}")
         return
 
-    notion = AsyncClient(auth=token)
-
-    embed_llm: BaseLLM
-    if cfg.embed_backend == "sentence_transformers":
-        from agentic_rag.llm.sentence_transformers_llm import SentenceTransformersLLM
-        embed_llm = SentenceTransformersLLM(cfg.llm.embed_model)
-    else:
-        from agentic_rag.llm.ollama import OllamaLLM
-        embed_llm = OllamaLLM(cfg.llm)
-
-    logger.info("Fetching all pages from Notion...")
-    pages: list[dict[str, Any]] = await async_collect_paginated_api(
-        notion.search,
-        query="",
-        filter={"property": "object", "value": "page"},
-    )
-    logger.info("Found %d pages", len(pages))
-
-    # Prune chunks for pages that no longer exist in Notion
-    all_chunks = collection.get(include=["metadatas"])
-    indexed_ids = {
-        m["page_id"] for m in all_chunks["metadatas"] or [] if m and "page_id" in m
-    }
-    live_ids = {p["id"] for p in pages}
-    stale_ids = indexed_ids - live_ids
-    if stale_ids:
-        stale_chunks = collection.get(
-            where=cast(Where, {"page_id": {"$in": list(stale_ids)}})
-        )
-        collection.delete(ids=stale_chunks["ids"])
-        logger.info(
-            "Pruned %d chunks for %d deleted pages",
-            len(stale_chunks["ids"]),
-            len(stale_ids),
-        )
-
-    total_chunks = 0
-
-    for page in pages:
-        page_id: str = page["id"]
-        title = _get_title(page)
-        page_url: str = page.get("url", f"https://notion.so/{page_id.replace('-', '')}")
-        last_edited_time: str = page.get("last_edited_time", "")
-
-        # Skip pages whose content hasn't changed since last index (unless --full)
-        if not args.full:
-            existing = collection.get(
-                where={"page_id": page_id},
-                include=["metadatas"],
-            )
-            existing_metas = existing["metadatas"] or []
-            if (
-                existing["ids"]
-                and existing_metas
-                and existing_metas[0].get("last_edited_time") == last_edited_time
-                and existing_metas[0].get("doc_format") == INDEX_DOC_FORMAT
-            ):
-                logger.debug("Page '%s' unchanged — skipping", title)
-                continue
-
-        blocks = await _fetch_text_from_blocks(notion, page_id)
-        if not blocks:
-            logger.debug("Page '%s' produced no indexable text — skipping", title)
-            continue
-        chunks = _chunk_text(blocks, size=cfg.ingestion.chunk_size, overlap=cfg.ingestion.chunk_overlap)
-
-        # Embed and upsert each chunk
-        ids: list[str] = []
-        embeddings: list[Sequence[float] | Sequence[int]] = []
-        documents: list[str] = []
-        chunk_metadatas: list[Metadata] = []
-
-        for i, chunk in enumerate(chunks):
-            # Prepend the page title so it is searchable by both vector and BM25
-            # (which index the stored document). Must match NotionIngester.ingest.
-            doc_text = f"{title}\n\n{chunk}"
-            try:
-                vector: list[float] = await embed_llm.embed(doc_text)
-            except Exception as exc:
-                logger.warning(
-                    "Embedding failed for chunk %d of '%s': %s", i, title, exc
-                )
-                continue
-
-            ids.append(f"{page_id}_chunk_{i}")
-            embeddings.append(vector)
-            documents.append(doc_text)
-            chunk_metadatas.append(
-                {
-                    "title": title,
-                    "source": page_url,
-                    "page_id": page_id,
-                    "last_edited_time": last_edited_time,
-                    "doc_format": INDEX_DOC_FORMAT,
-                }
-            )
-
-        if ids:
-            # Delete existing chunks for this page before upserting. Upsert only
-            # overwrites matching ids, so a page edited to produce fewer chunks
-            # would otherwise leave stale higher-index chunks orphaned in the
-            # index. Matches NotionIngester.ingest.
-            existing_for_page = collection.get(where={"page_id": page_id}, include=[])
-            if existing_for_page["ids"]:
-                collection.delete(ids=existing_for_page["ids"])
-            collection.upsert(
-                ids=ids,
-                embeddings=embeddings,
-                documents=documents,
-                metadatas=chunk_metadatas,
-            )
-            total_chunks += len(ids)
-            logger.info("Indexed '%s': %d chunk(s)", title, len(ids))
-
-    _rebuild_bm25(collection, cfg.bm25_path)
-    print(
-        f"Done. Indexed {len(pages)} pages, {total_chunks} chunks into ChromaDB at {cfg.chroma_path!r}."
-    )
+    total = await ingester.ingest(full=args.full)
+    print(f"Done. Indexed {total} chunks into ChromaDB at {config.chroma_path!r}.")
 
 
 if __name__ == "__main__":
