@@ -2,6 +2,7 @@
 
 import asyncio
 import functools
+import io
 import logging
 import os
 import urllib.request
@@ -9,7 +10,9 @@ from typing import Any, Mapping
 
 import chromadb
 import ollama
+import pytesseract
 from dotenv import load_dotenv
+from PIL import Image
 from notion_client import AsyncClient
 from notion_client.helpers import async_collect_paginated_api
 
@@ -237,13 +240,14 @@ class NotionIngester(BaseIngester):
     async def _caption_image(
         self, ollama_client: ollama.AsyncClient | None, url: str
     ) -> str:
-        """Download image and return a text caption via the configured vision model.
+        """Download an image and extract its text.
+
+        With a vision model configured, captions via ollama (describes diagrams
+        too). Otherwise falls back to Tesseract OCR — plain visible text only.
 
         NOTE: Uses ollama.AsyncClient directly because BaseLLM.embed() does not
         support vision/multimodal inputs.
         """
-        if ollama_client is None:
-            return ""
         try:
             loop = asyncio.get_running_loop()
 
@@ -252,6 +256,17 @@ class NotionIngester(BaseIngester):
                     return resp.read()  # type: ignore[no-any-return]
 
             image_bytes = await loop.run_in_executor(None, functools.partial(_fetch))
+
+            if ollama_client is None:
+                # No vision model: OCR fallback (Tesseract). Blocking, so offload.
+                def _ocr() -> str:
+                    text: str = pytesseract.image_to_string(
+                        Image.open(io.BytesIO(image_bytes))
+                    )
+                    return text.strip()
+
+                return await loop.run_in_executor(None, _ocr)
+
             response = await ollama_client.chat(
                 model=self._config.ingestion.vision_model,
                 messages=[
