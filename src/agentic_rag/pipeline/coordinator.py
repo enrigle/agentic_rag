@@ -78,14 +78,14 @@ class PipelineCoordinator:
                     # Rerank per source: the cross-encoder relevance gate can
                     # empty the list, letting off-topic queries fall through
                     # to the next source (e.g. web) instead of stopping here.
-                    # The gate is calibrated on the KB corpus, so disable it for
-                    # the terminal source — it has no fallback, and dropping its
-                    # results there means a web-answerable query returns nothing.
-                    is_terminal = source is self._sources[-1]
+                    # The gate is KB-calibrated, so honor it only for sources
+                    # that opt in (source.gated). Ungated sources (web) reorder
+                    # without dropping — their scores aren't on the KB scale and
+                    # they have no fallback. Keyed on the source, not position.
                     relevant = self._reranker.rerank(
                         user_query,
                         new_results,
-                        min_score=None if is_terminal else _USE_CONFIGURED,
+                        min_score=_USE_CONFIGURED if source.gated else None,
                     )
                     if relevant:
                         logger.info(

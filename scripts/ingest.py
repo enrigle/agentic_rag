@@ -33,6 +33,7 @@ from notion_client import AsyncClient
 from notion_client.helpers import async_collect_paginated_api
 
 from agentic_rag.config import load_config
+from agentic_rag.ingestion.notion import INDEX_DOC_FORMAT
 from agentic_rag.llm.base import BaseLLM
 
 logger = logging.getLogger(__name__)
@@ -335,6 +336,7 @@ async def ingest(args: argparse.Namespace) -> None:
                 existing["ids"]
                 and existing_metas
                 and existing_metas[0].get("last_edited_time") == last_edited_time
+                and existing_metas[0].get("doc_format") == INDEX_DOC_FORMAT
             ):
                 logger.debug("Page '%s' unchanged — skipping", title)
                 continue
@@ -372,6 +374,7 @@ async def ingest(args: argparse.Namespace) -> None:
                     "source": page_url,
                     "page_id": page_id,
                     "last_edited_time": last_edited_time,
+                    "doc_format": INDEX_DOC_FORMAT,
                 }
             )
 
@@ -380,7 +383,7 @@ async def ingest(args: argparse.Namespace) -> None:
             # overwrites matching ids, so a page edited to produce fewer chunks
             # would otherwise leave stale higher-index chunks orphaned in the
             # index. Matches NotionIngester.ingest.
-            existing_for_page = collection.get(where={"page_id": page_id})
+            existing_for_page = collection.get(where={"page_id": page_id}, include=[])
             if existing_for_page["ids"]:
                 collection.delete(ids=existing_for_page["ids"])
             collection.upsert(

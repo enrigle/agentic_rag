@@ -21,6 +21,9 @@ def _make_mock_source(
 ) -> MagicMock:
     source = MagicMock()
     source.name = name
+    # Mirror production: WebSource is ungated (no fallback, non-KB scores),
+    # RAGSource is gated. Without this a MagicMock auto-attr would be truthy.
+    source.gated = name != "web"
     source.search = AsyncMock(return_value=results)
     return source
 

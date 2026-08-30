@@ -19,6 +19,11 @@ logger = logging.getLogger(__name__)
 @runtime_checkable
 class BaseSource(Protocol):
     name: str
+    # Whether the KB-calibrated reranker gate applies to this source. False for
+    # sources whose scores aren't on the KB scale and that have no fallback
+    # (e.g. web) — gating them would drop answerable results with nowhere to
+    # fall through to. Decoupled from list position on purpose.
+    gated: bool
 
     async def search(
         self, query: str, ctx: PipelineContext
@@ -27,6 +32,7 @@ class BaseSource(Protocol):
 
 class RAGSource:
     name = "rag"
+    gated = True
 
     def __init__(self, llm: BaseLLM, hybrid: HybridRetriever) -> None:
         self._llm = llm
@@ -51,6 +57,7 @@ class RAGSource:
 
 class WebSource:
     name = "web"
+    gated = False
 
     async def search(self, query: str, ctx: PipelineContext) -> list[dict[str, Any]]:
         api_key = os.environ.get("TAVILY_API_KEY", "")
