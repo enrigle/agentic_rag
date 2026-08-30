@@ -2,13 +2,23 @@
 
 from __future__ import annotations
 
+from enum import Enum
 from typing import Any
 
 from sentence_transformers import CrossEncoder
 
-# Sentinel so callers can distinguish "use the configured gate" from an
-# explicit min_score=None (which disables the gate for this call only).
-_USE_CONFIGURED = object()
+
+class _GateDefault(Enum):
+    """Single-member sentinel enum so mypy narrows `is` checks against it.
+
+    Lets callers distinguish "use the configured gate" from an explicit
+    min_score=None (which disables the gate for this call only).
+    """
+
+    USE_CONFIGURED = "use_configured"
+
+
+_USE_CONFIGURED = _GateDefault.USE_CONFIGURED
 
 
 class CrossEncoderReranker:
@@ -31,7 +41,7 @@ class CrossEncoderReranker:
         self,
         query: str,
         candidates: list[dict[str, Any]],
-        min_score: float | None | object = _USE_CONFIGURED,
+        min_score: float | None | _GateDefault = _USE_CONFIGURED,
     ) -> list[dict[str, Any]]:
         """Score (query, doc) pairs and return the top-k by descending score.
 
@@ -63,6 +73,6 @@ class CrossEncoderReranker:
         kept = [
             doc | {"score": float(score)}
             for score, doc in ranked
-            if gate is None or score >= gate  # type: ignore[operator]
+            if gate is None or score >= gate
         ]
         return kept[: self._top_k]

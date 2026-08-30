@@ -25,6 +25,11 @@ from agentic_rag.retrieval.bm25 import BM25Retriever
 
 logger = logging.getLogger(__name__)
 
+# Bump when the stored-document format changes so incremental ingest re-embeds
+# pages indexed under an older format even if their last_edited_time is unchanged.
+# 2 = page title prepended to each chunk (searchable by vector + BM25).
+INDEX_DOC_FORMAT = 2
+
 
 class NotionIngester(BaseIngester):
     """Fetches pages from Notion, chunks them, embeds via BaseLLM, and upserts into ChromaDB.
@@ -122,6 +127,7 @@ class NotionIngester(BaseIngester):
                     existing["ids"]
                     and _existing_metas
                     and _existing_metas[0].get("last_edited_time") == last_edited_time
+                    and _existing_metas[0].get("doc_format") == INDEX_DOC_FORMAT
                 ):
                     logger.debug("Page '%s' unchanged — skipping", title)
                     continue
@@ -164,12 +170,17 @@ class NotionIngester(BaseIngester):
                         "source": page_url,
                         "page_id": page_id,
                         "last_edited_time": last_edited_time,
+                        "doc_format": INDEX_DOC_FORMAT,
                     }
                 )
 
             if ids:
-                # Delete existing chunks for this page before upserting new ones
-                existing_for_page = self._collection.get(where={"page_id": page_id})
+                # Delete existing chunks for this page before upserting new ones.
+                # include=[] → fetch ids only (ids always returned), not the
+                # stored documents/metadatas we don't need here.
+                existing_for_page = self._collection.get(
+                    where={"page_id": page_id}, include=[]
+                )
                 if existing_for_page["ids"]:
                     self._collection.delete(ids=existing_for_page["ids"])
                 self._collection.upsert(
