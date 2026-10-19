@@ -218,7 +218,7 @@ write and query vectors in the same embedding space. `OpenAICompatLLM.embed()` r
    `search()` — no process restart needed after an in-app sync).
 
 Image blocks: if `ingestion.vision_model` is set, download and caption via Ollama vision model
-(e.g. `llava`). Uses `ollama.AsyncClient` directly — not `BaseLLM` — because `BaseLLM.embed()` does
+(e.g. `llava`); otherwise extract visible text with Tesseract OCR. Uses `ollama.AsyncClient` directly — not `BaseLLM` — because `BaseLLM.embed()` does
 not support multimodal inputs.
 
 Chunk IDs: `{page_id}_chunk_{i}`. Metadata stored per chunk: `title`, `source` (URL), `page_id`,
@@ -289,6 +289,10 @@ Subsequent calls skip Redis silently (one `WARNING` log, no repeated tracebacks)
 
 **TTL:** `redis.expire(key, ttl_seconds)` applied after every `set()`. Default 1 hour.
 
+**Scope:** The key is the query embedding alone, so the coordinator uses the cache only for the
+first question of a thread (empty history); follow-ups depend on context and always run the
+pipeline. A hit is still appended to memory. The fixed error reply is never cached.
+
 ---
 
 ## 9. Feedback Loop
@@ -301,7 +305,9 @@ optional `note`, `category`.
 
 ### 9.2 LLM-as-Judge (`feedback/judge.py`)
 
-On thumbs-down, `classify_failure()` calls Ollama locally to classify the failure into one of:
+On thumbs-down, `classify_failure(llm, ...)` asks the pipeline's synthesis LLM (`make_synth_llm`:
+Groq → Azure OpenAI → Ollama) to classify the failure. It sends KB content nowhere synthesis does
+not already. Categories:
 - `retrieval_miss` — sources retrieved are irrelevant
 - `synthesis_failure` — sources are relevant but answer is wrong/incomplete
 - `missing_content` — topic does not exist in the KB
@@ -311,8 +317,12 @@ Result is written back to the SQLite row via `update_category()`.
 ### 9.3 Optimizer (`feedback/optimizer.py`)
 
 `apply_optimization(entries)` runs three steps:
-1. **Retrieval param tuning:** Computes median top_score for thumbs-up and thumbs-down entries.
-   Suggests `min_similarity = (median_up + median_down) / 2`. Writes to `config/default.yaml`.
+1. **Retrieval param tuning:** Computes median `top_similarity` (best query–chunk cosine, the same
+   scale as `min_similarity`) for thumbs-up and thumbs-down entries; entries without one (web
+   answers, legacy rows) are skipped. `top_score` is not used: after reranking it is a
+   cross-encoder logit. Suggests `min_similarity = (median_up + median_down) / 2` and edits that
+   one line in the active config file (`RAG_CONFIG_PATH` or `config/default.yaml`), keeping
+   comments. The UI then rebuilds the cached pipeline.
 2. **Few-shot examples:** Takes the most recent thumbs-up `(query, answer)` pairs (up to
    `few_shot_max`). Writes to `data/feedback_config.json`. These are loaded at synthesis time.
 3. **KB gaps:** Returns queries classified as `missing_content` for the user to act on.
@@ -347,8 +357,8 @@ connection state. One instance per process is correct.
 `get(thread_id)` returns the history list (empty if new thread). `append(thread_id, query, answer)`
 appends both user and assistant turns. No persistence — memory is lost on process restart.
 
-The `Synthesizer` includes the last N messages from chat history in the prompt under
-"Conversation so far:". No summary or truncation — full history is passed each time.
+The `Synthesizer` includes chat history in the prompt under "Conversation so far:". Memory keeps
+the last `MAX_MESSAGES` (10) messages per thread to bound prompt size; there is no summarisation.
 
 **Why no persistence:** Conversation memory is session-scoped. For production, replace with a
 Redis- or PostgreSQL-backed store.
@@ -357,7 +367,8 @@ Redis- or PostgreSQL-backed store.
 
 ## 12. Startup Health Checks
 
-`health.py` exports `run_checks(ollama_url, redis_url, chroma_path) -> list[ServiceStatus]`.
+`health.py` exports `run_checks(ollama_url, redis_url, chroma_path, embed_backend,
+synth_uses_ollama) -> list[ServiceStatus]`. Ollama is probed whenever it embeds or synthesizes.
 Runs Ollama and Redis probes in parallel (`asyncio.gather`). Groq and ChromaDB are sync checks
 (env var presence + path existence). Results are rendered in the Streamlit sidebar as coloured
 status indicators.

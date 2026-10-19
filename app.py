@@ -29,8 +29,14 @@ from agentic_rag.feedback.judge import classify_failure
 from agentic_rag.feedback.optimizer import apply_optimization
 from agentic_rag.ingestion.notion import NotionIngester
 from agentic_rag.models import QueryResult
+from agentic_rag.observability.langfuse import score_trace
 from agentic_rag.pipeline.coordinator import PipelineCoordinator
-from agentic_rag.pipeline.rag_pipeline import create_pipeline, make_embed_llm
+from agentic_rag.llm.base import BaseLLM
+from agentic_rag.pipeline.rag_pipeline import (
+    create_pipeline,
+    make_embed_llm,
+    make_synth_llm,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -116,6 +122,9 @@ def _service_statuses() -> list[ServiceStatus]:
             redis_url=cfg.redis.url,
             chroma_path=cfg.chroma_path,
             embed_backend=cfg.embed_backend,
+            synth_uses_ollama=not (
+                cfg.groq.is_configured() or cfg.azure_openai.is_configured()
+            ),
         )
     )
 
@@ -123,6 +132,11 @@ def _service_statuses() -> list[ServiceStatus]:
 @st.cache_resource(show_spinner=False)
 def get_pipeline() -> PipelineCoordinator:
     return create_pipeline()
+
+
+@st.cache_resource(show_spinner=False)
+def get_judge_llm() -> BaseLLM:
+    return make_synth_llm(load_config())
 
 
 def _to_result_dict(result: QueryResult) -> dict[str, Any]:
@@ -141,8 +155,25 @@ def _to_result_dict(result: QueryResult) -> dict[str, Any]:
         ],
         "tool_calls_used": result.tool_calls_used,
         "latency_ms": result.latency_ms,
+        "trace_id": result.trace_id,
         "top_score": max((s.score for s in result.sources), default=0.0),
+        # Cosine of the best KB chunk; None for web answers. Feeds min_similarity tuning.
+        "top_similarity": max(
+            (s.similarity for s in result.sources if s.similarity is not None),
+            default=None,
+        ),
     }
+
+
+def _score_feedback(result: dict[str, Any], rating: int, note: str = "") -> None:
+    """Mirror a saved thumbs rating onto the answer's Langfuse trace (no-op if untraced)."""
+    if result.get("trace_id"):
+        score_trace(
+            trace_id=result["trace_id"],
+            name="user_feedback",
+            value=1 if rating == 1 else 0,
+            comment=note or None,
+        )
 
 
 @st.cache_resource
@@ -161,7 +192,9 @@ def _store_conversation(thread_id: str, messages: list[Any]) -> None:
 
 
 # ── Background ingest (once per session) ───────────────────────────────────────
-if not st.session_state.get("sync_started"):
+# `streamlit run` executes this file as __main__. A plain import (tests) must not
+# start a real Notion ingest that rewrites data/chroma_db.
+if __name__ == "__main__" and not st.session_state.get("sync_started"):
     _maybe_start_ingest()
     st.session_state["sync_started"] = True
 
@@ -228,6 +261,8 @@ with st.sidebar:
             )
         parts = []
         if opt_result.new_min_similarity is not None:
+            # The cached pipeline holds the old threshold; rebuild it on next query.
+            get_pipeline.clear()
             parts.append(f"min_similarity → {opt_result.new_min_similarity}")
         if opt_result.few_shot_count:
             parts.append(f"{opt_result.few_shot_count} few-shot examples saved")
@@ -287,9 +322,11 @@ if last_result and not st.session_state.rated:
                 for s in last_result["sources"]
             ],
             top_score=last_result.get("top_score", 0.0),
+            top_similarity=last_result.get("top_similarity"),
             rating=1,
         )
         save(entry)
+        _score_feedback(last_result, 1)
         st.session_state.rated = True
         st.rerun()
 
@@ -313,13 +350,16 @@ if last_result and not st.session_state.rated:
                 answer=last_result["answer"],
                 sources=sources_for_store,
                 top_score=last_result.get("top_score", 0.0),
+                top_similarity=last_result.get("top_similarity"),
                 rating=-1,
                 note=note,
             )
             entry_id = save(entry)
+            _score_feedback(last_result, -1, note)
             with st.spinner("Analyzing failure..."):
                 category = asyncio.run(
                     classify_failure(
+                        get_judge_llm(),
                         query=last_query,
                         answer=last_result["answer"],
                         sources=sources_for_store,

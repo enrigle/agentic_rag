@@ -144,3 +144,35 @@ async def test_hybrid_search_deduplicates_by_source() -> None:
     # The surviving chunk from the duplicate page should be the highest-ranked one
     dup_result = next(r for r in results if r.source == same_source)
     assert dup_result.id == "page1_chunk_0"
+
+
+@pytest.mark.asyncio
+async def test_hybrid_search_keeps_cosine_similarity() -> None:
+    # score becomes RRF; the original cosine must survive for feedback tuning.
+    cfg = RAGConfig(retriever=RetrieverConfig(top_n=3, bm25_top_k=10, rrf_k=60))
+    vector_store = MagicMock()
+    vector_store.search = AsyncMock(
+        return_value=[
+            SearchResult(
+                id="doc1",
+                title="D",
+                source="kb/1",
+                content="c",
+                score=0.83,
+                similarity=0.83,
+            )
+        ]
+    )
+    vector_store.fetch_by_ids = AsyncMock(
+        return_value=[
+            SearchResult(id="doc2", title="E", source="kb/2", content="d", score=0.0)
+        ]
+    )
+    keyword = MagicMock()
+    keyword.search = MagicMock(return_value=["doc2"])
+
+    results = await HybridRetriever(vector_store, keyword, cfg).search([0.1], "q")
+
+    by_id = {r.id: r for r in results}
+    assert by_id["doc1"].similarity == 0.83
+    assert by_id["doc2"].similarity is None  # BM25-only: no cosine available

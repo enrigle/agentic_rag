@@ -320,7 +320,8 @@ class NotionIngester(BaseIngester):
                 url = img.get("file", {}).get("url") or img.get("external", {}).get(
                     "url", ""
                 )
-                if url and self._config.ingestion.vision_model:
+                # No vision model → ollama_client is None → _caption_image OCRs.
+                if url:
                     caption = await self._caption_image(ollama_client, url)
                     if caption:
                         typed_lines.append(

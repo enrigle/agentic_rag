@@ -50,6 +50,7 @@ class RAGSource:
                 "title": r.title,
                 "content": r.content,
                 "score": r.score,
+                "similarity": r.similarity,
             }
             for r in results
         ]
