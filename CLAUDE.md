@@ -17,7 +17,7 @@ uv run python scripts/ingest.py --full    # force re-embed everything
 uv run python scripts/ingest.py --status  # print index stats
 
 # Run a query without the UI
-uv run python scripts/main.py
+uv run python scripts/main.py "your question"
 
 # Evaluate
 uv run python scripts/eval.py

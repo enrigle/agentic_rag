@@ -150,6 +150,7 @@ class HybridRetriever:
                     source=base.source,
                     content=base.content,
                     score=round(rrf_scores[fid], 6),
+                    similarity=base.similarity,
                 )
             )
         return results

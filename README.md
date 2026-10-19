@@ -133,7 +133,8 @@ Results saved to `evals/results.jsonl`.
 
 Optional Langfuse tracing for LangGraph runs + Ollama calls. When enabled:
 
-- `main.AgenticRAGSystem.query()` returns `trace_id`
+- `PipelineCoordinator.query()` returns `QueryResult.trace_id`
+- UI thumbs up/down is logged to the trace as `user_feedback` score
 - `eval.py` logs `[y/n]` rating back to Langfuse as `human_rating` score
 
 ```bash
@@ -145,7 +146,7 @@ export LANGFUSE_HOST=...   # optional (cloud or self-hosted)
 
 ## Conversation memory (follow-ups)
 
-App keeps rolling in-memory chat history per `thread_id`, uses it as extra context for retrieval + synthesis. Pass stable `thread_id` when calling `AgenticRAGSystem.query()`. Streamlit UI auto-generates per-session `thread_id`.
+App keeps rolling in-memory chat history per `thread_id`, uses it as extra context for retrieval + synthesis. Pass stable `thread_id` when calling `PipelineCoordinator.query()` (CLI: `scripts/main.py "question" --thread-id t1`). Streamlit UI auto-generates per-session `thread_id`.
 
 ## Architecture
 

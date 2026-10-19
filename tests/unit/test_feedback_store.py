@@ -57,3 +57,45 @@ def test_update_category_nonexistent_id_is_noop(tmp_path: Path) -> None:
     # No error raised, no rows affected — silent no-op
     update_category(999, "retrieval_miss", db_path=db)
     assert get_all(db_path=db) == []
+
+
+def test_top_similarity_round_trips(tmp_path: Path) -> None:
+    db = tmp_path / "test.db"
+    save(
+        FeedbackEntry(
+            query="q",
+            answer="a",
+            sources=[],
+            top_score=-3.2,
+            rating=1,
+            top_similarity=0.71,
+        ),
+        db_path=db,
+    )
+    save(
+        FeedbackEntry(query="q", answer="a", sources=[], top_score=0.9, rating=-1),
+        db_path=db,
+    )
+    entries = get_all(db_path=db)
+    assert entries[0].top_similarity == 0.71
+    assert entries[1].top_similarity is None
+
+
+def test_legacy_table_gets_top_similarity_column(tmp_path: Path) -> None:
+    import sqlite3
+
+    db = tmp_path / "legacy.db"
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            "CREATE TABLE feedback (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "timestamp TEXT NOT NULL, query TEXT NOT NULL, answer TEXT NOT NULL, "
+            "sources TEXT NOT NULL, top_score REAL NOT NULL, rating INTEGER NOT NULL, "
+            "note TEXT NOT NULL DEFAULT '', category TEXT NOT NULL DEFAULT '')"
+        )
+        conn.execute(
+            "INSERT INTO feedback (timestamp, query, answer, sources, top_score, rating) "
+            "VALUES ('t', 'old q', 'old a', '[]', -4.0, 1)"
+        )
+    entries = get_all(db_path=db)
+    assert entries[0].query == "old q"
+    assert entries[0].top_similarity is None

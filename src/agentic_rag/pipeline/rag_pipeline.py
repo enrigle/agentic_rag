@@ -6,6 +6,7 @@ import logging
 
 from agentic_rag.cache.semantic_cache import SemanticCache
 from agentic_rag.config import RAGConfig, load_config
+from agentic_rag.feedback.optimizer import FEEDBACK_CONFIG_PATH
 from agentic_rag.llm.base import BaseLLM
 from agentic_rag.llm.ollama import OllamaLLM
 from agentic_rag.llm.openai_compat import AzureOpenAILLM, GroqLLM
@@ -39,10 +40,23 @@ def make_embed_llm(config: RAGConfig) -> BaseLLM:
     return llm
 
 
+def make_synth_llm(config: RAGConfig) -> BaseLLM:
+    """Answer-writing LLM: Groq if configured, then Azure OpenAI, else local Ollama."""
+    if config.groq.is_configured():
+        logger.info("Synthesis: GroqLLM (model=%s)", config.groq.model)
+        return GroqLLM(config.groq, timeout=config.llm.request_timeout)
+    if config.azure_openai.is_configured():
+        logger.info(
+            "Synthesis: AzureOpenAILLM deployment=%s", config.azure_openai.deployment
+        )
+        return AzureOpenAILLM(config.azure_openai, timeout=config.llm.request_timeout)
+    return OllamaLLM(config.llm)
+
+
 def create_pipeline(config: RAGConfig | None = None) -> PipelineCoordinator:
     """Wire PipelineCoordinator from config.
 
-    - Embeddings always use OllamaLLM (local, private).
+    - Embeddings use make_embed_llm (embed_backend: Ollama or sentence-transformers).
     - Synthesis uses GroqLLM when GROQ_API_KEY is set, then AzureOpenAILLM when
       azure_openai.endpoint is set, otherwise falls back to OllamaLLM.
     - SemanticCache is always attached; it fails open if Redis is unreachable.
@@ -53,17 +67,7 @@ def create_pipeline(config: RAGConfig | None = None) -> PipelineCoordinator:
     llm = make_embed_llm(config)
     hybrid = HybridRetriever(ChromaVectorStore(config), BM25Retriever(config), config)
 
-    synth_llm: BaseLLM = llm
-    if config.groq.is_configured():
-        synth_llm = GroqLLM(config.groq, timeout=config.llm.request_timeout)
-        logger.info("Synthesis: GroqLLM (model=%s)", config.groq.model)
-    elif config.azure_openai.is_configured():
-        synth_llm = AzureOpenAILLM(
-            config.azure_openai, timeout=config.llm.request_timeout
-        )
-        logger.info(
-            "Synthesis: AzureOpenAILLM deployment=%s", config.azure_openai.deployment
-        )
+    synth_llm = make_synth_llm(config)
 
     cache = SemanticCache(config.redis, llm)
 
@@ -74,7 +78,7 @@ def create_pipeline(config: RAGConfig | None = None) -> PipelineCoordinator:
             top_k=config.retriever.reranker_top_k,
             min_score=config.retriever.reranker_min_score,
         ),
-        synthesizer=Synthesizer(synth_llm),
+        synthesizer=Synthesizer(synth_llm, few_shot_path=FEEDBACK_CONFIG_PATH),
         memory=ConversationMemory(),
         max_tool_calls=config.max_tool_calls,
         cache=cache,

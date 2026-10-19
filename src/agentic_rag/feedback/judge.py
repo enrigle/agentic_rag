@@ -6,7 +6,6 @@ import json
 import logging
 from typing import Any
 
-from agentic_rag.config import load_config
 from agentic_rag.llm.base import BaseLLM
 
 logger = logging.getLogger(__name__)
@@ -29,24 +28,17 @@ Pick exactly one failure category:
 Respond with JSON only, no other text: {{"category": "..."}}"""
 
 
-def _build_synth_llm() -> BaseLLM:
-    from agentic_rag.llm.ollama import OllamaLLM
-    from agentic_rag.llm.openai_compat import AzureOpenAILLM, GroqLLM
-
-    cfg = load_config()
-    if cfg.groq.is_configured():
-        return GroqLLM(cfg.groq)
-    if cfg.azure_openai.is_configured():
-        return AzureOpenAILLM(cfg.azure_openai)
-    return OllamaLLM(cfg.llm)
-
-
 async def classify_failure(
+    llm: BaseLLM,
     query: str,
     answer: str,
     sources: list[dict[str, Any]],
 ) -> str:
-    """Classify a thumbs-down response. Returns one of three categories or 'unknown'."""
+    """Classify a thumbs-down response. Returns one of three categories or 'unknown'.
+
+    ``llm`` is the pipeline's answer-writing model (see make_synth_llm), so the
+    judge sends KB content nowhere synthesis doesn't already.
+    """
     sources_block = (
         "\n".join(
             f'  {i + 1}. "{s.get("title", "")}" — "{str(s.get("content", ""))[:350]}..."'
@@ -62,7 +54,6 @@ async def classify_failure(
     )
 
     try:
-        llm = _build_synth_llm()
         text = await llm.chat(prompt)
         start = text.find("{")
         end = text.rfind("}") + 1

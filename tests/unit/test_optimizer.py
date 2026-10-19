@@ -1,3 +1,4 @@
+import pytest
 import json
 from pathlib import Path
 from agentic_rag.feedback.store import FeedbackEntry
@@ -6,25 +7,44 @@ from agentic_rag.feedback.optimizer import (
     apply_optimization,
     get_few_shot_examples,
     get_kb_gaps,
+    set_min_similarity,
     tune_retrieval_params,
 )
 
 
 def _entry(
     rating: int,
-    top_score: float,
+    similarity: float | None,
     category: str = "",
     query: str = "q",
     answer: str = "a",
 ) -> FeedbackEntry:
+    # top_score is a cross-encoder logit in production; tuning must ignore it.
     return FeedbackEntry(
         query=query,
         answer=answer,
         sources=[],
-        top_score=top_score,
+        top_score=-5.0,
         rating=rating,
         category=category,
+        top_similarity=similarity,
     )
+
+
+def test_tune_ignores_entries_without_similarity() -> None:
+    # Web answers and legacy rows have no cosine similarity; they carry no signal.
+    entries = [
+        _entry(1, 0.8),
+        _entry(1, None),
+        _entry(-1, 0.2),
+        _entry(-1, None),
+    ]
+    assert tune_retrieval_params(entries) == 0.5
+
+
+def test_tune_returns_none_when_only_legacy_rows() -> None:
+    entries = [_entry(1, None), _entry(-1, None)]
+    assert tune_retrieval_params(entries) is None
 
 
 def test_tune_suggests_midpoint() -> None:
@@ -122,3 +142,60 @@ def test_apply_optimization_yaml_write_failure_clears_min_sim(tmp_path: Path) ->
         entries, config_path=config_path, feedback_config_path=fb_config_path
     )
     assert result.new_min_similarity is None
+
+
+_YAML = """\
+retriever:
+  # cosine cutoff
+  min_similarity: 0.50  # keep me
+  top_n: 20
+redis:
+  url: "redis://x"
+"""
+
+
+def test_set_min_similarity_keeps_comments_and_other_keys() -> None:
+    out = set_min_similarity(_YAML, 0.42)
+    assert "# cosine cutoff" in out
+    assert "# keep me" in out
+    assert "min_similarity: 0.42" in out
+    import yaml
+
+    raw = yaml.safe_load(out)
+    assert raw == {
+        "retriever": {"min_similarity": 0.42, "top_n": 20},
+        "redis": {"url": "redis://x"},
+    }
+
+
+def test_set_min_similarity_adds_missing_key_and_section() -> None:
+    import yaml
+
+    no_key = set_min_similarity("retriever:\n  top_n: 20\n", 0.4)
+    assert yaml.safe_load(no_key)["retriever"] == {"min_similarity": 0.4, "top_n": 20}
+    no_section = set_min_similarity("redis:\n  url: x\n", 0.4)
+    assert yaml.safe_load(no_section)["retriever"] == {"min_similarity": 0.4}
+
+
+def test_set_min_similarity_ignores_same_key_in_other_section() -> None:
+    import yaml
+
+    text = "redis:\n  min_similarity: 0.9\nretriever:\n  min_similarity: 0.5\n"
+    raw = yaml.safe_load(set_min_similarity(text, 0.3))
+    assert raw["redis"]["min_similarity"] == 0.9
+    assert raw["retriever"]["min_similarity"] == 0.3
+
+
+def test_apply_optimization_writes_active_config_file(
+    tmp_path: Path, monkeypatch: "pytest.MonkeyPatch"
+) -> None:
+    # Must edit the file load_config() reads (RAG_CONFIG_PATH), not a fixed path.
+    active = tmp_path / "docker.yaml"
+    active.write_text("retriever:\n  min_similarity: 0.35\n")
+    monkeypatch.setenv("RAG_CONFIG_PATH", str(active))
+    entries = [_entry(1, 0.8), _entry(1, 0.75), _entry(-1, 0.1), _entry(-1, 0.15)]
+    result = apply_optimization(
+        entries, feedback_config_path=tmp_path / "feedback_config.json"
+    )
+    assert result.new_min_similarity is not None
+    assert f"min_similarity: {result.new_min_similarity}" in active.read_text()

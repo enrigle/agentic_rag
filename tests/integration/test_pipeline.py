@@ -41,6 +41,7 @@ def _make_coordinator(
     mock_llm: BaseLLM,
     config: RAGConfig,
     source_results: list[dict[str, Any]] | None = None,
+    cache: Any = None,
 ) -> PipelineCoordinator:
     if source_results is None:
         source_results = [
@@ -61,6 +62,7 @@ def _make_coordinator(
         memory=ConversationMemory(),
         max_tool_calls=config.max_tool_calls,
         embed_llm=mock_llm,
+        cache=cache,
     )
 
 
@@ -249,3 +251,132 @@ async def test_query_thread_isolation(
     history_b = coordinator._memory.get("B")
     assert all(m["content"] != "thread B question" for m in history_a)
     assert all(m["content"] != "thread A question" for m in history_b)
+
+
+@pytest.mark.asyncio
+async def test_query_result_carries_similarity(
+    mock_llm: BaseLLM,
+    sample_config: RAGConfig,
+) -> None:
+    coordinator = _make_coordinator(
+        mock_llm,
+        sample_config,
+        source_results=[
+            {
+                "id": "doc1",
+                "title": "T",
+                "source": "kb/1",
+                "content": "c",
+                "score": -2.5,
+                "similarity": 0.74,
+            },
+            {
+                "id": "w",
+                "title": "W",
+                "source": "http://w",
+                "content": "c",
+                "score": 0.9,
+            },
+        ],
+    )
+    result = await coordinator.query("q")
+    assert [s.similarity for s in result.sources] == [0.74, None]
+
+
+def _mock_cache(hit: QueryResult | None = None) -> MagicMock:
+    cache = MagicMock()
+    cache.get = AsyncMock(return_value=hit)
+    cache.set = AsyncMock()
+    return cache
+
+
+@pytest.mark.asyncio
+async def test_follow_up_bypasses_cache(
+    mock_llm: BaseLLM, sample_config: RAGConfig
+) -> None:
+    # "What about the second one?" means different things in different threads;
+    # a query-only cache key would serve another conversation's answer.
+    cache = _mock_cache()
+    coordinator = _make_coordinator(mock_llm, sample_config, cache=cache)
+    await coordinator.query("List the projects", thread_id="t1")
+    cache.get.reset_mock()
+    cache.set.reset_mock()
+
+    await coordinator.query("What about the second one?", thread_id="t1")
+
+    cache.get.assert_not_awaited()
+    cache.set.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_cache_hit_still_records_turn_in_memory(
+    mock_llm: BaseLLM, sample_config: RAGConfig
+) -> None:
+    hit = QueryResult(
+        answer="cached answer", sources=[], tool_calls_used=1, latency_ms=1.0
+    )
+    coordinator = _make_coordinator(mock_llm, sample_config, cache=_mock_cache(hit))
+
+    result = await coordinator.query("What is X?", thread_id="t1")
+
+    assert result.answer == "cached answer"
+    assert coordinator._memory.get("t1") == [
+        {"role": "user", "content": "What is X?"},
+        {"role": "assistant", "content": "cached answer"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_error_answer_is_not_cached(
+    mock_llm: BaseLLM, sample_config: RAGConfig
+) -> None:
+    cache = _mock_cache()
+    failing = _make_mock_source("rag", [])
+    failing.search = AsyncMock(side_effect=RuntimeError("chroma down"))
+    coordinator = PipelineCoordinator(
+        sources=[failing],
+        reranker=_identity_reranker(),
+        synthesizer=Synthesizer(mock_llm),
+        memory=ConversationMemory(),
+        max_tool_calls=sample_config.max_tool_calls,
+        embed_llm=mock_llm,
+        cache=cache,
+    )
+
+    result = await coordinator.query("What is X?", thread_id="t1")
+
+    assert "Something went wrong" in result.answer
+    cache.set.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_query_result_carries_trace_id(
+    mock_llm: BaseLLM, sample_config: RAGConfig
+) -> None:
+    import contextlib
+    from unittest.mock import patch
+
+    @contextlib.contextmanager
+    def fake_obs(name: str, **_: Any) -> Any:
+        yield MagicMock(trace_id="trace-123")
+
+    coordinator = _make_coordinator(mock_llm, sample_config)
+    with patch("agentic_rag.pipeline.coordinator._lf_obs", fake_obs):
+        result = await coordinator.query("q")
+    assert result.trace_id == "trace-123"
+
+
+@pytest.mark.asyncio
+async def test_trace_id_none_when_tracing_off(
+    mock_llm: BaseLLM, sample_config: RAGConfig
+) -> None:
+    import contextlib
+    from unittest.mock import patch
+
+    @contextlib.contextmanager
+    def off(name: str, **_: Any) -> Any:
+        yield None  # observation() yields None when Langfuse is not configured
+
+    with patch("agentic_rag.pipeline.coordinator._lf_obs", off):
+        result = await _make_coordinator(mock_llm, sample_config).query("q")
+    assert result.trace_id is None
