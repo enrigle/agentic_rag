@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
@@ -9,6 +11,12 @@ from agentic_rag.config import RAGConfig, LLMConfig, RetrieverConfig
 from agentic_rag.models import SearchResult
 from agentic_rag.llm.base import BaseLLM
 from agentic_rag.retrieval.base import BaseVectorStore, BaseKeywordRetriever
+
+# Tests must never ship traces to the real Langfuse project. app.py calls
+# load_dotenv(), which does not override variables that are already set, so
+# blanking them here (before any test imports app) keeps tracing off.
+for _key in ("LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY"):
+    os.environ[_key] = ""
 
 
 @pytest.fixture

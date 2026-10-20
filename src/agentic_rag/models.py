@@ -12,7 +12,10 @@ class SearchResult:
     title: str
     source: str
     content: str
-    score: float
+    score: float  # ranking score; its scale depends on the stage (cosine, RRF, cross-encoder)
+    similarity: float | None = (
+        None  # query-chunk cosine from the vector store; None if unknown
+    )
 
 
 @dataclass
@@ -21,6 +24,9 @@ class QueryResult:
     sources: list[SearchResult]
     tool_calls_used: int
     latency_ms: float
+    trace_id: str | None = (
+        None  # Langfuse trace for score_trace(); None when tracing is off
+    )
 
 
 @dataclass

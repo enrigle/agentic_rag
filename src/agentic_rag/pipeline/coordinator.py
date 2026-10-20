@@ -48,17 +48,22 @@ class PipelineCoordinator:
         except Exception:  # noqa: BLE001
             logger.debug("embed() failed up front; downstream will retry/skip")
 
-        # Cache check — return immediately on hit
-        if self._cache is not None:
-            cached = await self._cache.get(user_query, query_vec)
+        # The cache key is the query alone, so only stand-alone questions are
+        # safe to share: a follow-up's meaning depends on this thread's history.
+        chat_history = self._memory.get(thread_id)
+        cache = None if chat_history else self._cache
+
+        if cache is not None:
+            cached = await cache.get(user_query, query_vec)
             if cached is not None:
                 logger.debug("cache hit for query len=%d", len(user_query))
+                self._memory.append(thread_id, user_query, cached.answer)
                 return cached
 
         t0 = time.monotonic()
         ctx = PipelineContext(
             query=user_query,
-            chat_history=self._memory.get(thread_id),
+            chat_history=chat_history,
             results=[],
             final_answer=None,
             error=None,
@@ -67,7 +72,12 @@ class PipelineCoordinator:
             query_vec=query_vec,
         )
 
-        with _lf_obs("pipeline.query", as_type="span", input={"query": user_query}):
+        trace_id: str | None = None
+        with _lf_obs(
+            "pipeline.query", as_type="span", input={"query": user_query}
+        ) as obs:
+            if obs is not None:
+                trace_id = obs.trace_id
             try:
                 for source in self._sources:
                     if ctx.tool_calls >= ctx.max_tool_calls:
@@ -118,6 +128,7 @@ class PipelineCoordinator:
                 source=r.get("source", ""),
                 content=r.get("content", ""),
                 score=float(r.get("score", 0.0)),
+                similarity=r.get("similarity"),
             )
             for r in ctx.results
         ]
@@ -126,9 +137,11 @@ class PipelineCoordinator:
             sources=sources,
             tool_calls_used=ctx.tool_calls,
             latency_ms=latency_ms,
+            trace_id=trace_id,
         )
 
-        if self._cache is not None:
-            await self._cache.set(user_query, result, query_vec)
+        # Never cache the fixed error reply: it would mask recovery for the whole TTL.
+        if cache is not None and ctx.error is None:
+            await cache.set(user_query, result, query_vec)
 
         return result

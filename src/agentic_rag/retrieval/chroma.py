@@ -66,6 +66,7 @@ class ChromaVectorStore(BaseVectorStore):
                         source=meta.get("source", ""),
                         content=doc,
                         score=score,
+                        similarity=score,
                     )
                 )
             else:

@@ -21,7 +21,8 @@ CREATE TABLE IF NOT EXISTS feedback (
     top_score REAL    NOT NULL,
     rating    INTEGER NOT NULL,
     note      TEXT    NOT NULL DEFAULT '',
-    category  TEXT    NOT NULL DEFAULT ''
+    category  TEXT    NOT NULL DEFAULT '',
+    top_similarity REAL
 )
 """
 
@@ -31,10 +32,12 @@ class FeedbackEntry:
     query: str
     answer: str
     sources: list[dict[str, Any]]  # [{title, content, score}]
-    top_score: float
+    top_score: float  # best final ranking score (cross-encoder logit, or web score)
     rating: int  # 1 = thumbs up, -1 = thumbs down
     note: str = ""
     category: str = ""
+    # Best query-chunk cosine; None for web answers and rows saved before this column.
+    top_similarity: float | None = None
     timestamp: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
@@ -43,6 +46,10 @@ class FeedbackEntry:
 
 def _ensure_table(conn: sqlite3.Connection) -> None:
     conn.execute(_CREATE_TABLE)
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(feedback)")}
+    if "top_similarity" not in columns:
+        # Legacy DB: old rows keep NULL, so the tuner ignores their non-cosine top_score.
+        conn.execute("ALTER TABLE feedback ADD COLUMN top_similarity REAL")
     conn.commit()
 
 
@@ -53,8 +60,8 @@ def save(entry: FeedbackEntry, db_path: Path = DB_PATH) -> int:
     with sqlite3.connect(db_path) as conn:
         _ensure_table(conn)
         cursor = conn.execute(
-            "INSERT INTO feedback (timestamp, query, answer, sources, top_score, rating, note, category) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO feedback (timestamp, query, answer, sources, top_score, rating, note, "
+            "category, top_similarity) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 entry.timestamp,
                 entry.query,
@@ -64,6 +71,7 @@ def save(entry: FeedbackEntry, db_path: Path = DB_PATH) -> int:
                 entry.rating,
                 entry.note,
                 entry.category,
+                entry.top_similarity,
             ),
         )
         conn.commit()
@@ -78,8 +86,8 @@ def get_all(db_path: Path = DB_PATH) -> list[FeedbackEntry]:
     with sqlite3.connect(db_path) as conn:
         _ensure_table(conn)
         rows = conn.execute(
-            "SELECT id, timestamp, query, answer, sources, top_score, rating, note, category "
-            "FROM feedback ORDER BY id ASC"
+            "SELECT id, timestamp, query, answer, sources, top_score, rating, note, category, "
+            "top_similarity FROM feedback ORDER BY id ASC"
         ).fetchall()
     return [
         FeedbackEntry(
@@ -92,6 +100,7 @@ def get_all(db_path: Path = DB_PATH) -> list[FeedbackEntry]:
             rating=row[6],
             note=row[7],
             category=row[8],
+            top_similarity=row[9],
         )
         for row in rows
     ]

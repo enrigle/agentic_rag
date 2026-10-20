@@ -41,3 +41,30 @@ def test_caption_image_returns_empty_on_failure() -> None:
         result = asyncio.run(ingester._caption_image(None, "http://x/y.png"))
 
     assert result == ""
+
+
+def test_image_block_uses_ocr_when_vision_model_empty() -> None:
+    """Regression: the vision_model gate skipped images, so OCR never ran."""
+    from unittest.mock import AsyncMock
+
+    cfg = MagicMock()
+    cfg.ingestion.vision_model = ""
+    with patch("agentic_rag.ingestion.notion.chromadb.PersistentClient"):
+        ingester = NotionIngester(cfg, MagicMock())
+    image_block = {
+        "type": "image",
+        "image": {"type": "file", "file": {"url": "http://x/y.png"}},
+    }
+    with (
+        patch(
+            "agentic_rag.ingestion.notion.async_collect_paginated_api",
+            AsyncMock(return_value=[image_block]),
+        ),
+        patch.object(
+            ingester, "_caption_image", AsyncMock(return_value="chart text")
+        ) as caption,
+    ):
+        lines = asyncio.run(ingester._fetch_text_from_blocks(MagicMock(), None, "b1"))
+
+    caption.assert_awaited_once_with(None, "http://x/y.png")
+    assert {"type": "paragraph", "text": "[Image: chart text]"} in lines

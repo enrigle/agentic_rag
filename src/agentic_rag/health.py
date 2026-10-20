@@ -57,16 +57,28 @@ async def run_checks(
     redis_url: str,
     chroma_path: str,
     embed_backend: str = "ollama",
+    synth_uses_ollama: bool = True,
 ) -> list[ServiceStatus]:
-    if embed_backend == "sentence_transformers":
-        embed_st: ServiceStatus = ServiceStatus(
-            "Embeddings", True, "sentence-transformers (in-process)"
-        )
-        redis_st = await _check_redis(redis_url)
-    else:
-        embed_st, redis_st = await asyncio.gather(
+    """Probe every service the configured pipeline depends on.
+
+    Ollama is needed when it embeds *or* synthesizes (no Groq/Azure configured),
+    so in-process embeddings alone don't make it optional.
+    """
+    st_embed = embed_backend == "sentence_transformers"
+    needs_ollama = not st_embed or synth_uses_ollama
+
+    if needs_ollama:
+        ollama_st, redis_st = await asyncio.gather(
             _check_ollama(ollama_url),
             _check_redis(redis_url),
         )
+        services = [ollama_st]
+    else:
+        redis_st = await _check_redis(redis_url)
+        services = []
 
-    return [embed_st, redis_st, _check_groq(), _check_chromadb(chroma_path)]
+    if st_embed:
+        services.insert(
+            0, ServiceStatus("Embeddings", True, "sentence-transformers (in-process)")
+        )
+    return [*services, redis_st, _check_groq(), _check_chromadb(chroma_path)]

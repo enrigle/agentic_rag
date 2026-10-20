@@ -5,12 +5,14 @@ from __future__ import annotations
 import json
 import logging
 import sys
+import uuid
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from agentic_rag.config import RAGConfig
+from agentic_rag.observability.langfuse import score_trace
 from agentic_rag.pipeline.coordinator import PipelineCoordinator
 from agentic_rag.pipeline.rag_pipeline import create_pipeline
 
@@ -86,7 +88,10 @@ class Evaluator:
                 print(f"Expected keywords: {', '.join(expected)}")
             print("Running query...")
 
-            result = await self._get_pipeline().query(query)
+            # Fresh thread per item: shared history would leak earlier answers in.
+            result = await self._get_pipeline().query(
+                query, thread_id=f"eval-{qid}-{uuid.uuid4().hex[:8]}"
+            )
             answer: str = result.answer
             sources = result.sources
 
@@ -118,6 +123,13 @@ class Evaluator:
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
             _append_result(record)
+            if result.trace_id:
+                score_trace(
+                    trace_id=result.trace_id,
+                    name="human_rating",
+                    value=1 if rating_input == "y" else 0,
+                    comment=note or None,
+                )
             print(f"Saved {'✓' if rating_input == 'y' else '✗'}\n")
 
         print("Done.")

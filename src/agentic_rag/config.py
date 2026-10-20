@@ -100,6 +100,14 @@ def _parse_sub(cls: type[_DC], data: dict[str, Any]) -> _DC:
     return cls(**{k: v for k, v in data.items() if k in known})
 
 
+def resolve_config_path(path: Path | None = None) -> Path:
+    """The YAML file load_config() reads: ``path``, else RAG_CONFIG_PATH, else default."""
+    if path is not None:
+        return path
+    env_path = os.environ.get("RAG_CONFIG_PATH")
+    return Path(env_path) if env_path else _DEFAULT_CONFIG_PATH
+
+
 def load_config(path: Path | None = None) -> RAGConfig:
     """Load RAGConfig from YAML, falling back to defaults for missing keys.
 
@@ -111,11 +119,7 @@ def load_config(path: Path | None = None) -> RAGConfig:
     Returns:
         A fully populated RAGConfig instance.
     """
-    if path is None:
-        env_path = os.environ.get("RAG_CONFIG_PATH")
-        resolved = Path(env_path) if env_path else _DEFAULT_CONFIG_PATH
-    else:
-        resolved = path
+    resolved = resolve_config_path(path)
 
     if not resolved.exists():
         logger.warning("Config file not found at %s; using all defaults.", resolved)
