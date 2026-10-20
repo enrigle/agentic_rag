@@ -198,7 +198,8 @@ src/agentic_rag/
 ├── health.py          # startup dependency checks
 ├── feedback/          # Store + judge + optimizer (feedback loop)
 ├── observability/     # Langfuse tracing/scoring
-└── evaluation/        # Evaluator logic (reads/writes evals/)
+├── evaluation/        # Evaluator logic (reads/writes evals/)
+└── ui/                # Streamlit-free app helpers: background ingest, conversation store, answer/feedback shaping
 ```
 
 ```
