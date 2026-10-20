@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Literal
 
 
 @dataclass
@@ -16,6 +16,12 @@ class SearchResult:
     similarity: float | None = (
         None  # query-chunk cosine from the vector store; None if unknown
     )
+
+
+@dataclass
+class ChatMessage:
+    role: Literal["user", "assistant"]
+    content: str
 
 
 @dataclass
@@ -32,8 +38,8 @@ class QueryResult:
 @dataclass
 class PipelineContext:
     query: str
-    chat_history: list[dict[str, Any]]
-    results: list[dict[str, Any]]  # single accumulator; all sources append here
+    chat_history: list[ChatMessage]
+    results: list[SearchResult]  # relevant results from the source that answered
     final_answer: str | None
     error: str | None
     tool_calls: int

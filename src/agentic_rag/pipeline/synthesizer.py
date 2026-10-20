@@ -50,19 +50,13 @@ class Synthesizer:
             return "No relevant information found for your query."
 
         context_blocks = "\n\n".join(
-            f"[{i + 1}] {r.get('title', '')}\n"
-            f"Source: {r.get('source', '')}\n"
-            f"{r.get('content', '')}"
+            f"[{i + 1}] {r.title}\nSource: {r.source}\n{r.content}"
             for i, r in enumerate(ctx.results)
         )
 
         chat_section = ""
         if ctx.chat_history:
-            lines = [
-                f"{m['role']}: {m['content']}"
-                for m in ctx.chat_history
-                if m.get("content")
-            ]
+            lines = [f"{m.role}: {m.content}" for m in ctx.chat_history if m.content]
             if lines:
                 chat_section = "\n\nConversation so far:\n" + "\n".join(lines)
 

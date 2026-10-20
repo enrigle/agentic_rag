@@ -11,13 +11,25 @@ import pytest
 
 from agentic_rag.models import PipelineContext
 from agentic_rag.pipeline.synthesizer import Synthesizer
+from agentic_rag.models import SearchResult
+
+
+def _sr(
+    id: str = "",
+    title: str = "",
+    source: str = "",
+    content: str = "",
+    score: float = 0.0,
+    similarity: float | None = None,
+) -> SearchResult:
+    return SearchResult(id, title, source, content, score, similarity)
 
 
 def _ctx() -> PipelineContext:
     return PipelineContext(
         query="q",
         chat_history=[],
-        results=[{"title": "T", "source": "s", "content": "body"}],
+        results=[_sr(title="T", source="s", content="body")],
         final_answer=None,
         error=None,
         tool_calls=0,
@@ -83,3 +95,15 @@ async def test_malformed_file_warns_and_answers(
             == "answer"
         )
     assert "few-shot" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_chat_history_rendered_in_prompt() -> None:
+    from agentic_rag.models import ChatMessage
+
+    ctx = _ctx()
+    ctx.chat_history = [ChatMessage("user", "earlier q"), ChatMessage("assistant", "")]
+    llm = _llm()
+    await Synthesizer(llm).synthesize("q", ctx)
+    assert "Conversation so far:\nuser: earlier q" in _prompt(llm)
+    assert "assistant:" not in _prompt(llm)  # empty turns skipped

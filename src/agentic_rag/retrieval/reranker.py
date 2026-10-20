@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import dataclasses
 from enum import Enum
 from typing import Any
 
 from sentence_transformers import CrossEncoder
+
+from agentic_rag.models import SearchResult
 
 
 class _GateDefault(Enum):
@@ -40,23 +43,23 @@ class CrossEncoderReranker:
     def rerank(
         self,
         query: str,
-        candidates: list[dict[str, Any]],
+        candidates: list[SearchResult],
         min_score: float | None | _GateDefault = _USE_CONFIGURED,
-    ) -> list[dict[str, Any]]:
+    ) -> list[SearchResult]:
         """Score (query, doc) pairs and return the top-k by descending score.
 
         Args:
             query: The user query string.
-            candidates: List of result dicts, each with at least a "content" key.
+            candidates: Results to score by their content.
             min_score: Gate override for this call. Defaults to the configured
                 gate; pass None to reorder without dropping (e.g. a terminal
                 source with no fallback), whose gate would otherwise be tuned
                 for a different corpus.
 
         Returns:
-            Up to top_k dicts from candidates, sorted by cross-encoder score
-            descending. The "score" field on each dict is replaced with the
-            cross-encoder score. When the gate is set, candidates scoring
+            Up to top_k results, sorted by cross-encoder score descending, as
+            copies whose score is the cross-encoder logit (other fields, incl.
+            similarity, unchanged; inputs are not mutated). When the gate is set, candidates scoring
             below it are dropped — possibly returning an empty list — so the
             caller can treat "nothing relevant" differently from "nothing".
         """
@@ -67,11 +70,11 @@ class CrossEncoderReranker:
         # are kept when they all fit in top_k — skip the forward pass.
         if gate is None and len(candidates) <= self._top_k:
             return candidates
-        pairs: list[Any] = [(query, c["content"]) for c in candidates]
+        pairs: list[Any] = [(query, c.content) for c in candidates]
         scores: list[float] = self._model.predict(pairs).tolist()
         ranked = sorted(zip(scores, candidates), key=lambda x: x[0], reverse=True)
         kept = [
-            doc | {"score": float(score)}
+            dataclasses.replace(doc, score=float(score))
             for score, doc in ranked
             if gate is None or score >= gate
         ]
