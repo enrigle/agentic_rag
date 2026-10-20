@@ -6,7 +6,7 @@ import logging
 import os
 from typing import Any, Protocol, runtime_checkable
 
-from tavily import AsyncTavilyClient  # type: ignore[import-untyped]
+from tavily import AsyncTavilyClient
 
 from agentic_rag.llm.base import BaseLLM
 from agentic_rag.models import PipelineContext
