@@ -45,8 +45,11 @@ class PipelineCoordinator:
         query_vec: list[float] | None = None
         try:
             query_vec = await self._embed_llm.embed(user_query)
-        except Exception:  # noqa: BLE001
-            logger.debug("embed() failed up front; downstream will retry/skip")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "embed() failed up front (%s); cache skipped, retrieval will retry",
+                exc,
+            )
 
         # The cache key is the query alone, so only stand-alone questions are
         # safe to share: a follow-up's meaning depends on this thread's history.

@@ -34,6 +34,18 @@ logger = logging.getLogger(__name__)
 INDEX_DOC_FORMAT = 2
 
 
+def _download_image(url: str) -> bytes:
+    """Fetch image bytes (blocking; run in an executor)."""
+    with urllib.request.urlopen(url, timeout=10) as resp:
+        return resp.read()  # type: ignore[no-any-return]
+
+
+def _ocr_image(image_bytes: bytes) -> str:
+    """Extract visible text with Tesseract (blocking; run in an executor)."""
+    text: str = pytesseract.image_to_string(Image.open(io.BytesIO(image_bytes)))
+    return text.strip()
+
+
 class NotionIngester(BaseIngester):
     """Fetches pages from Notion, chunks them, embeds via BaseLLM, and upserts into ChromaDB.
 
@@ -44,7 +56,7 @@ class NotionIngester(BaseIngester):
     def __init__(self, config: RAGConfig, llm: BaseLLM) -> None:
         self._config = config
         self._llm = llm
-        self._chroma = chromadb.PersistentClient(path=config.chroma_path)
+        self._chroma = chromadb.PersistentClient(path=str(config.chroma_path))
         self._collection = self._chroma.get_or_create_collection(
             name=config.collection_name,
             metadata={"hnsw:space": "cosine"},
@@ -197,7 +209,7 @@ class NotionIngester(BaseIngester):
 
         self._rebuild_bm25()
         logger.info(
-            "Done. Indexed %d pages, %d chunks into ChromaDB at %r.",
+            "Done. Indexed %d pages, %d chunks into ChromaDB at %s.",
             len(pages),
             total_chunks,
             self._config.chroma_path,
@@ -250,22 +262,15 @@ class NotionIngester(BaseIngester):
         """
         try:
             loop = asyncio.get_running_loop()
-
-            def _fetch() -> bytes:
-                with urllib.request.urlopen(url, timeout=10) as resp:
-                    return resp.read()  # type: ignore[no-any-return]
-
-            image_bytes = await loop.run_in_executor(None, functools.partial(_fetch))
+            image_bytes = await loop.run_in_executor(
+                None, functools.partial(_download_image, url)
+            )
 
             if ollama_client is None:
                 # No vision model: OCR fallback (Tesseract). Blocking, so offload.
-                def _ocr() -> str:
-                    text: str = pytesseract.image_to_string(
-                        Image.open(io.BytesIO(image_bytes))
-                    )
-                    return text.strip()
-
-                return await loop.run_in_executor(None, _ocr)
+                return await loop.run_in_executor(
+                    None, functools.partial(_ocr_image, image_bytes)
+                )
 
             response = await ollama_client.chat(
                 model=self._config.ingestion.vision_model,

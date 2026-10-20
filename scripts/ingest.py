@@ -40,7 +40,7 @@ async def ingest(args: argparse.Namespace) -> None:
         return
 
     total = await ingester.ingest(full=args.full)
-    print(f"Done. Indexed {total} chunks into ChromaDB at {config.chroma_path!r}.")
+    print(f"Done. Indexed {total} chunks into ChromaDB at {config.chroma_path}.")
 
 
 if __name__ == "__main__":

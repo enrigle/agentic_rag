@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-from pathlib import Path
 
 import bm25s
 
@@ -18,7 +17,7 @@ class BM25Retriever(BaseKeywordRetriever):
     """BM25 keyword retriever that persists its index to disk."""
 
     def __init__(self, config: RAGConfig) -> None:
-        self._bm25_path = Path(config.bm25_path)
+        self._bm25_path = config.bm25_path
         self._retriever: bm25s.BM25 | None = None
         self._ids: list[str] = []
         self._loaded_mtime: float | None = None

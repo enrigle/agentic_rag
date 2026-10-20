@@ -18,7 +18,7 @@ from agentic_rag.retrieval.bm25 import BM25Retriever
 
 @pytest.fixture
 def cfg(tmp_path: Path) -> Any:
-    return SimpleNamespace(bm25_path=str(tmp_path / "bm25_index"))
+    return SimpleNamespace(bm25_path=tmp_path / "bm25_index")
 
 
 def test_search_picks_up_index_built_after_init(cfg: Any) -> None:

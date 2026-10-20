@@ -78,8 +78,8 @@ class RedisConfig:
 
 @dataclass
 class RAGConfig:
-    chroma_path: str = "./chroma_db"
-    bm25_path: str = "./bm25_index"
+    chroma_path: Path = Path("./chroma_db")
+    bm25_path: Path = Path("./bm25_index")
     collection_name: str = "notion_kb"
     max_tool_calls: int = 5
     embed_backend: str = "ollama"  # "ollama" | "sentence_transformers"
@@ -148,6 +148,9 @@ def load_config(path: Path | None = None) -> RAGConfig:
         "embed_backend",
     }
     top_level = {k: v for k, v in raw.items() if k in top_level_keys}
+    for key in ("chroma_path", "bm25_path"):
+        if isinstance(top_level.get(key), str):
+            top_level[key] = Path(top_level[key])
 
     try:
         return RAGConfig(

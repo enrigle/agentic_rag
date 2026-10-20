@@ -380,3 +380,18 @@ async def test_trace_id_none_when_tracing_off(
     with patch("agentic_rag.pipeline.coordinator._lf_obs", off):
         result = await _make_coordinator(mock_llm, sample_config).query("q")
     assert result.trace_id is None
+
+
+@pytest.mark.asyncio
+async def test_upfront_embed_failure_is_logged(
+    mock_llm: BaseLLM, sample_config: RAGConfig, caplog: pytest.LogCaptureFixture
+) -> None:
+    import logging
+
+    coordinator = _make_coordinator(mock_llm, sample_config)
+    coordinator._embed_llm = MagicMock(
+        embed=AsyncMock(side_effect=RuntimeError("ollama down"))
+    )
+    with caplog.at_level(logging.WARNING):
+        await coordinator.query("q")
+    assert "ollama down" in caplog.text

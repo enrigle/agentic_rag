@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any
-
 from agentic_rag.models import SearchResult
 
 
@@ -17,17 +15,6 @@ class BaseVectorStore(ABC):
     @abstractmethod
     async def fetch_by_ids(self, ids: list[str]) -> list[SearchResult]:
         """Fetch documents by ID without requiring a query vector."""
-        ...
-
-    @abstractmethod
-    def upsert(
-        self,
-        ids: list[str],
-        embeddings: list[list[float]],
-        documents: list[str],
-        metadatas: list[dict[str, Any]],
-    ) -> None:
-        """Upsert documents into the vector store."""
         ...
 
 
