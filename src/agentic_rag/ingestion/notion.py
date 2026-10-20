@@ -23,7 +23,7 @@ from agentic_rag.ingestion.chunker import (
     _extract_plain_text,
     _get_title,
 )
-from agentic_rag.llm.base import BaseLLM
+from agentic_rag.llm.base import Embedder
 from agentic_rag.retrieval.bm25 import BM25Retriever
 
 logger = logging.getLogger(__name__)
@@ -47,13 +47,13 @@ def _ocr_image(image_bytes: bytes) -> str:
 
 
 class NotionIngester(BaseIngester):
-    """Fetches pages from Notion, chunks them, embeds via BaseLLM, and upserts into ChromaDB.
+    """Fetches pages from Notion, chunks them, embeds via an Embedder, and upserts into ChromaDB.
 
-    Image captioning uses ollama.AsyncClient directly because BaseLLM.embed()
+    Image captioning uses ollama.AsyncClient directly because Embedder.embed()
     does not support vision/multimodal inputs.
     """
 
-    def __init__(self, config: RAGConfig, llm: BaseLLM) -> None:
+    def __init__(self, config: RAGConfig, llm: Embedder) -> None:
         self._config = config
         self._llm = llm
         self._chroma = chromadb.PersistentClient(path=str(config.chroma_path))
@@ -257,7 +257,7 @@ class NotionIngester(BaseIngester):
         With a vision model configured, captions via ollama (describes diagrams
         too). Otherwise falls back to Tesseract OCR — plain visible text only.
 
-        NOTE: Uses ollama.AsyncClient directly because BaseLLM.embed() does not
+        NOTE: Uses ollama.AsyncClient directly because Embedder.embed() does not
         support vision/multimodal inputs.
         """
         try:

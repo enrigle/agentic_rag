@@ -8,15 +8,14 @@ import os
 import openai
 
 from agentic_rag.config import AzureOpenAIConfig, GroqConfig
-from agentic_rag.llm.base import BaseLLM
 
 logger = logging.getLogger(__name__)
 
 _GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 
 
-class OpenAICompatLLM(BaseLLM):
-    """Shared chat logic for any OpenAI-compatible provider."""
+class OpenAICompatLLM:
+    """ChatModel for any OpenAI-compatible provider. No embed(): embeddings stay local."""
 
     def __init__(
         self,
@@ -56,9 +55,6 @@ class OpenAICompatLLM(BaseLLM):
             )
         logger.debug("chat() ← content_len=%d", len(content))
         return content
-
-    async def embed(self, _text: str) -> list[float]:
-        raise NotImplementedError("embeddings stay local — use OllamaLLM for embed()")
 
 
 class AzureOpenAILLM(OpenAICompatLLM):

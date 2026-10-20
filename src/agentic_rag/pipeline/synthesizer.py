@@ -6,7 +6,7 @@ import json
 import logging
 from pathlib import Path
 
-from agentic_rag.llm.base import BaseLLM
+from agentic_rag.llm.base import ChatModel
 from agentic_rag.models import PipelineContext
 from agentic_rag.observability.langfuse import observation as _lf_obs
 
@@ -40,7 +40,7 @@ def format_few_shot(examples: list[tuple[str, str]]) -> str:
 
 
 class Synthesizer:
-    def __init__(self, llm: BaseLLM, few_shot_path: Path | None = None) -> None:
+    def __init__(self, llm: ChatModel, few_shot_path: Path | None = None) -> None:
         self._llm = llm
         # Re-read per call: the optimizer rewrites it while the pipeline stays cached.
         self._few_shot_path = few_shot_path

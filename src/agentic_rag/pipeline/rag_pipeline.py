@@ -7,7 +7,7 @@ import logging
 from agentic_rag.cache.semantic_cache import SemanticCache
 from agentic_rag.config import RAGConfig, load_config
 from agentic_rag.feedback.optimizer import FEEDBACK_CONFIG_PATH
-from agentic_rag.llm.base import BaseLLM
+from agentic_rag.llm.base import ChatModel, Embedder
 from agentic_rag.llm.ollama import OllamaLLM
 from agentic_rag.llm.openai_compat import AzureOpenAILLM, GroqLLM
 from agentic_rag.llm.sentence_transformers_llm import SentenceTransformersLLM
@@ -23,14 +23,14 @@ from agentic_rag.retrieval.reranker import CrossEncoderReranker
 logger = logging.getLogger(__name__)
 
 
-def make_embed_llm(config: RAGConfig) -> BaseLLM:
+def make_embed_llm(config: RAGConfig) -> Embedder:
     """Embedding LLM selected by config.embed_backend.
 
     Shared by the pipeline and the in-app ingest so both sides always write
     and query vectors in the same embedding space.
     """
     if config.embed_backend == "sentence_transformers":
-        llm: BaseLLM = SentenceTransformersLLM(config.llm.embed_model)
+        llm: Embedder = SentenceTransformersLLM(config.llm.embed_model)
         logger.info(
             "Embeddings: SentenceTransformersLLM model=%s", config.llm.embed_model
         )
@@ -40,7 +40,7 @@ def make_embed_llm(config: RAGConfig) -> BaseLLM:
     return llm
 
 
-def make_synth_llm(config: RAGConfig) -> BaseLLM:
+def make_synth_llm(config: RAGConfig) -> ChatModel:
     """Answer-writing LLM: Groq if configured, then Azure OpenAI, else local Ollama."""
     if config.groq.is_configured():
         logger.info("Synthesis: GroqLLM (model=%s)", config.groq.model)

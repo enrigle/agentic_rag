@@ -5,13 +5,12 @@ import logging
 import ollama
 
 from agentic_rag.config import LLMConfig
-from agentic_rag.llm.base import BaseLLM
 
 logger = logging.getLogger(__name__)
 
 
-class OllamaLLM(BaseLLM):
-    """Concrete LLM backend using the Ollama async client."""
+class OllamaLLM:
+    """Ollama backend: both an Embedder and a ChatModel."""
 
     def __init__(self, config: LLMConfig) -> None:
         if not config.base_url:

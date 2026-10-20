@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import time
 
-from agentic_rag.llm.base import BaseLLM
+from agentic_rag.llm.base import Embedder
 from agentic_rag.models import PipelineContext, QueryResult
 from agentic_rag.observability.langfuse import observation as _lf_obs
 from agentic_rag.pipeline.memory import ConversationMemory
@@ -25,7 +25,7 @@ class PipelineCoordinator:
         synthesizer: Synthesizer,
         memory: ConversationMemory,
         max_tool_calls: int,
-        embed_llm: BaseLLM,
+        embed_llm: Embedder,
         cache: SemanticCache | None = None,
     ) -> None:
         self._sources = sources

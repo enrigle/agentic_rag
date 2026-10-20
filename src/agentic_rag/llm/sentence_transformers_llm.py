@@ -6,20 +6,15 @@ import logging
 
 from sentence_transformers import SentenceTransformer
 
-from agentic_rag.llm.base import BaseLLM
-
 logger = logging.getLogger(__name__)
 
 
-class SentenceTransformersLLM(BaseLLM):
-    """Embed-only LLM backend backed by sentence-transformers (CPU inference)."""
+class SentenceTransformersLLM:
+    """Embedder backed by sentence-transformers (CPU inference). Has no chat()."""
 
     def __init__(self, model_name: str = "BAAI/bge-small-en-v1.5") -> None:
         self._model = SentenceTransformer(model_name)
         logger.debug("SentenceTransformersLLM initialised: model=%s", model_name)
-
-    async def chat(self, prompt: str) -> str:
-        raise NotImplementedError("embed-only; use a chat LLM for synthesis")
 
     async def embed(self, text: str) -> list[float]:
         if not text:

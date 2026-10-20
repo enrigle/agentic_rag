@@ -1,32 +1,25 @@
-"""Abstract base class for all LLM backends."""
+"""LLM interfaces: one Protocol per job, so a backend implements only what it can do."""
 
-from abc import ABC, abstractmethod
+from typing import Protocol, runtime_checkable
 
 
-class BaseLLM(ABC):
-    """Abstract base for LLM backends.
+@runtime_checkable
+class Embedder(Protocol):
+    """Turns text into a vector (Ollama, sentence-transformers).
 
-    All methods are coroutines and must be awaited.
-    Implementations should raise RuntimeError on backend/network failure
-    and ValueError on invalid or empty responses.
+    Implementations raise ValueError on empty input/output and RuntimeError on
+    backend or network failure.
     """
 
-    @abstractmethod
-    async def chat(self, prompt: str) -> str:
-        """Send prompt to the chat model and return the reply as a string.
+    async def embed(self, text: str) -> list[float]: ...
 
-        Raises:
-            ValueError: If the model returns an empty or null response.
-            RuntimeError: On backend or network failure.
-        """
-        ...
 
-    @abstractmethod
-    async def embed(self, text: str) -> list[float]:
-        """Return the embedding vector for text.
+@runtime_checkable
+class ChatModel(Protocol):
+    """Answers a prompt with text (Ollama, Groq, Azure OpenAI).
 
-        Raises:
-            ValueError: If the model returns no embeddings.
-            RuntimeError: On backend or network failure.
-        """
-        ...
+    Implementations raise ValueError on an empty reply and RuntimeError on
+    backend or network failure.
+    """
+
+    async def chat(self, prompt: str) -> str: ...
