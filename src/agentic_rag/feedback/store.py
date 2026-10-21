@@ -17,8 +17,6 @@ FailureCategory = Literal[
     "retrieval_miss", "synthesis_failure", "missing_content", "unknown"
 ]
 
-DB_PATH = Path("data/feedback.db")
-
 _CREATE_TABLE = """
 CREATE TABLE IF NOT EXISTS feedback (
     id        INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -95,7 +93,7 @@ def _ensure_table(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
-def save(entry: FeedbackEntry, db_path: Path = DB_PATH) -> int:
+def save(entry: FeedbackEntry, db_path: Path) -> int:
     """Persist a FeedbackEntry. Returns the new row id."""
     if entry.rating not in (1, -1):
         raise ValueError(f"rating must be 1 or -1, got {entry.rating!r}")
@@ -123,7 +121,7 @@ def save(entry: FeedbackEntry, db_path: Path = DB_PATH) -> int:
         return row_id
 
 
-def get_all(db_path: Path = DB_PATH) -> list[FeedbackEntry]:
+def get_all(db_path: Path) -> list[FeedbackEntry]:
     """Return all entries ordered oldest first."""
     with sqlite3.connect(db_path) as conn:
         _ensure_table(conn)
@@ -148,9 +146,7 @@ def get_all(db_path: Path = DB_PATH) -> list[FeedbackEntry]:
     ]
 
 
-def update_category(
-    entry_id: int, category: FailureCategory, db_path: Path = DB_PATH
-) -> None:
+def update_category(entry_id: int, category: FailureCategory, db_path: Path) -> None:
     """Write the judge's classification back to the row."""
     with sqlite3.connect(db_path) as conn:
         _ensure_table(conn)

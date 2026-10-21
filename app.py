@@ -18,7 +18,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from agentic_rag.config import load_config
+from agentic_rag.config import RAGConfig, load_config
 from agentic_rag.health import ServiceStatus, run_checks
 from agentic_rag.feedback.store import get_all, save, update_category
 from agentic_rag.feedback.judge import classify_failure
@@ -40,6 +40,11 @@ logger = logging.getLogger(__name__)
 
 
 # Process-wide singletons: st.cache_resource shares one instance across sessions.
+@st.cache_resource
+def get_config() -> RAGConfig:
+    return load_config()
+
+
 @st.cache_resource
 def get_ingest() -> BackgroundIngest:
     return BackgroundIngest()
@@ -76,6 +81,7 @@ def get_judge_llm() -> ChatModel:
     return make_synth_llm(load_config())
 
 
+_cfg = get_config()
 _ingest = get_ingest()
 _conversations = get_conversations()
 
@@ -136,16 +142,17 @@ with st.sidebar:
 
     st.header("Feedback")
 
-    all_entries = get_all()
+    all_entries = get_all(_cfg.feedback_db_path)
     rated_count = len(all_entries)
     st.caption(f"{rated_count} ratings collected")
 
     optimize_disabled = rated_count < 10
     if st.button("Optimize", disabled=optimize_disabled, help="Requires 10+ ratings"):
         with st.spinner("Optimizing..."):
-            _cfg = load_config()
             opt_result = apply_optimization(
-                all_entries, few_shot_max=_cfg.retriever.few_shot_max
+                all_entries,
+                feedback_config_path=_cfg.feedback_config_path,
+                few_shot_max=_cfg.retriever.few_shot_max,
             )
         parts = []
         if opt_result.new_min_similarity is not None:
@@ -198,7 +205,7 @@ if last_result and not st.session_state.rated:
     col1, col2 = st.columns(2)
 
     if col1.button("👍 Good answer"):
-        save(feedback_entry(last_query, last_result, rating=1))
+        save(feedback_entry(last_query, last_result, rating=1), _cfg.feedback_db_path)
         score_feedback(last_result, 1)
         st.session_state.rated = True
         st.rerun()
@@ -211,7 +218,7 @@ if last_result and not st.session_state.rated:
         note = st.text_input("What was wrong? (optional)")
         if st.button("Submit feedback"):
             entry = feedback_entry(last_query, last_result, rating=-1, note=note)
-            entry_id = save(entry)
+            entry_id = save(entry, _cfg.feedback_db_path)
             score_feedback(last_result, -1, note)
             with st.spinner("Analyzing failure..."):
                 category = asyncio.run(
@@ -222,7 +229,7 @@ if last_result and not st.session_state.rated:
                         sources=entry.sources,
                     )
                 )
-            update_category(entry_id, category)
+            update_category(entry_id, category, _cfg.feedback_db_path)
             st.session_state.rated = True
             st.session_state.show_note = False
             st.rerun()

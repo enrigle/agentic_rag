@@ -185,6 +185,14 @@ RAGConfig
 
 Unknown YAML keys are silently ignored (`_parse_sub` filters to known dataclass fields).
 Missing keys use dataclass defaults. Invalid YAML falls back to all defaults with a warning.
+An invalid `embed_backend` (not `ollama` / `sentence_transformers`) raises `ValueError`.
+
+**Data paths:** `chroma_path`, `bm25_path`, `feedback_db_path` (default `data/feedback.db`) and
+`feedback_config_path` (default `data/feedback_config.json`) are top-level keys. Relative values
+are resolved against the project root, not the process working directory, so starting the app
+from another folder cannot create a second, empty index or feedback DB. Absolute values (Docker's
+`/app/data/...`) are used as-is. The feedback store and optimizer take these paths as parameters;
+there are no module-level path globals.
 
 **Why `RAG_CONFIG_PATH`:** Docker Compose sets this env var to `config/docker.yaml` so the
 containerised app uses container-appropriate paths (`/app/data/...`) and the Redis URL
