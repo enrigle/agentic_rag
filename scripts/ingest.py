@@ -31,12 +31,12 @@ async def ingest(args: argparse.Namespace) -> None:
 
     if args.status:
         stats = ingester.status()
-        print(f"Total chunks  : {stats['total_chunks']}")
-        print(f"Distinct pages: {stats['distinct_pages']}")
-        if stats["oldest_edit"]:
-            print(f"Oldest edit   : {stats['oldest_edit']}")
-        if stats["newest_edit"]:
-            print(f"Newest edit   : {stats['newest_edit']}")
+        print(f"Total chunks  : {stats.total_chunks}")
+        print(f"Distinct pages: {stats.distinct_pages}")
+        if stats.oldest_edit:
+            print(f"Oldest edit   : {stats.oldest_edit}")
+        if stats.newest_edit:
+            print(f"Newest edit   : {stats.newest_edit}")
         return
 
     total = await ingester.ingest(full=args.full)
