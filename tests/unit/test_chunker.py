@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 
-from agentic_rag.ingestion.chunker import _chunk_text, _extract_plain_text
+from agentic_rag.ingestion.chunker import TextBlock, _chunk_text, _extract_plain_text
 
 
 # ---------------------------------------------------------------------------
@@ -67,12 +67,12 @@ def test_chunk_text_empty_input_returns_empty() -> None:
 
 
 def test_chunk_text_only_empty_text_blocks_returns_empty() -> None:
-    blocks = [{"type": "paragraph", "text": "   "}]
+    blocks = [TextBlock("paragraph", "   ")]
     assert _chunk_text(blocks) == []
 
 
 def test_chunk_text_single_short_paragraph_returns_one_chunk() -> None:
-    blocks = [{"type": "paragraph", "text": "Short content."}]
+    blocks = [TextBlock("paragraph", "Short content.")]
     chunks = _chunk_text(blocks, size=800)
     assert len(chunks) == 1
     assert "Short content." in chunks[0]
@@ -80,8 +80,8 @@ def test_chunk_text_single_short_paragraph_returns_one_chunk() -> None:
 
 def test_chunk_text_heading_context_prepended() -> None:
     blocks = [
-        {"type": "heading_2", "text": "Section Header"},
-        {"type": "paragraph", "text": "Paragraph under section."},
+        TextBlock("heading_2", "Section Header"),
+        TextBlock("paragraph", "Paragraph under section."),
     ]
     chunks = _chunk_text(blocks, size=800)
     assert len(chunks) == 1
@@ -91,13 +91,13 @@ def test_chunk_text_heading_context_prepended() -> None:
 
 def test_chunk_text_heading_only_returns_empty() -> None:
     # Headings are not emitted as chunks on their own; they set context
-    blocks = [{"type": "heading_1", "text": "Just a heading"}]
+    blocks = [TextBlock("heading_1", "Just a heading")]
     assert _chunk_text(blocks) == []
 
 
 def test_chunk_text_oversized_paragraph_is_split() -> None:
     long_text = "word " * 400  # ~2000 chars
-    blocks = [{"type": "paragraph", "text": long_text}]
+    blocks = [TextBlock("paragraph", long_text)]
     chunks = _chunk_text(blocks, size=100, overlap=10)
     assert len(chunks) > 1
     for chunk in chunks:
@@ -108,7 +108,7 @@ def test_chunk_text_oversized_paragraph_is_split() -> None:
 def test_chunk_text_oversized_paragraph_overlap() -> None:
     """Chunks from an oversized paragraph should overlap."""
     long_para = "word" * 50  # creates "wordword..." — long enough for multiple chunks
-    blocks = [{"type": "paragraph", "text": long_para}]
+    blocks = [TextBlock("paragraph", long_para)]
     chunks = _chunk_text(blocks, size=20, overlap=10)
     assert len(chunks) >= 2
     # The end of chunk 0 and the start of chunk 1 should share content
@@ -123,9 +123,9 @@ def test_chunk_text_oversized_paragraph_overlap() -> None:
 def test_chunk_text_multiple_paragraphs_batched() -> None:
     """Short paragraphs should be grouped into a single chunk when under size."""
     blocks = [
-        {"type": "paragraph", "text": "First."},
-        {"type": "paragraph", "text": "Second."},
-        {"type": "paragraph", "text": "Third."},
+        TextBlock("paragraph", "First."),
+        TextBlock("paragraph", "Second."),
+        TextBlock("paragraph", "Third."),
     ]
     chunks = _chunk_text(blocks, size=800)
     assert len(chunks) == 1
@@ -137,9 +137,9 @@ def test_chunk_text_flushes_when_size_exceeded() -> None:
     """Paragraphs that together exceed size should be split into multiple chunks."""
     para = "x" * 300
     blocks = [
-        {"type": "paragraph", "text": para},
-        {"type": "paragraph", "text": para},
-        {"type": "paragraph", "text": para},
+        TextBlock("paragraph", para),
+        TextBlock("paragraph", para),
+        TextBlock("paragraph", para),
     ]
     chunks = _chunk_text(blocks, size=400, overlap=0)
     assert len(chunks) >= 2

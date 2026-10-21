@@ -8,10 +8,11 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from agentic_rag import health
+from agentic_rag.config import EmbedBackend
 from agentic_rag.health import ServiceStatus
 
 
-async def _names(embed_backend: str, synth_uses_ollama: bool) -> list[str]:
+async def _names(embed_backend: EmbedBackend, synth_uses_ollama: bool) -> list[str]:
     ollama = AsyncMock(return_value=ServiceStatus("Ollama", False, "down"))
     redis = AsyncMock(return_value=ServiceStatus("Redis", True))
     with (

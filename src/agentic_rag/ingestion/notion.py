@@ -19,6 +19,7 @@ from notion_client.helpers import async_collect_paginated_api
 from agentic_rag.config import RAGConfig
 from agentic_rag.ingestion.base import BaseIngester, IngestStats
 from agentic_rag.ingestion.chunker import (
+    TextBlock,
     _chunk_text,
     _extract_plain_text,
     _get_title,
@@ -290,11 +291,10 @@ class NotionIngester(BaseIngester):
         block_id: str,
         depth: int = 0,
         max_depth: int = 10,
-    ) -> list[dict[str, str]]:
+    ) -> list[TextBlock]:
         """Recursively extract typed text blocks from all Notion blocks.
 
-        Returns a list of ``{"type": block_type, "text": plain_text}`` dicts so
-        that callers can distinguish headings from body text when chunking.
+        The block type lets the chunker tell headings from body text.
         """
         if depth > max_depth:
             return []
@@ -308,13 +308,13 @@ class NotionIngester(BaseIngester):
             logger.warning("Could not fetch blocks for %s: %s", block_id, exc)
             return []
 
-        typed_lines: list[dict[str, str]] = []
+        typed_lines: list[TextBlock] = []
         for block in blocks:
             block_type = block.get("type", "")
 
             text = _extract_plain_text(block)
             if text.strip():
-                typed_lines.append({"type": block_type, "text": text})
+                typed_lines.append(TextBlock(block_type, text))
 
             if block_type == "image":
                 img = block.get("image", {})
@@ -326,7 +326,7 @@ class NotionIngester(BaseIngester):
                     caption = await self._caption_image(ollama_client, url)
                     if caption:
                         typed_lines.append(
-                            {"type": "paragraph", "text": f"[Image: {caption}]"}
+                            TextBlock("paragraph", f"[Image: {caption}]")
                         )
                 continue
 
@@ -336,7 +336,7 @@ class NotionIngester(BaseIngester):
                 child_title = block.get("child_page", {}).get("title", "")
                 if child_title:
                     typed_lines.append(
-                        {"type": "paragraph", "text": f"[Sub-page: {child_title}]"}
+                        TextBlock("paragraph", f"[Sub-page: {child_title}]")
                     )
                 continue
 

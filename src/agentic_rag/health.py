@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
+from agentic_rag.config import EmbedBackend
+
 
 @dataclass
 class ServiceStatus:
@@ -56,7 +58,7 @@ async def run_checks(
     ollama_url: str,
     redis_url: str,
     chroma_path: Path,
-    embed_backend: str = "ollama",
+    embed_backend: EmbedBackend = "ollama",
     synth_uses_ollama: bool = True,
 ) -> list[ServiceStatus]:
     """Probe every service the configured pipeline depends on.

@@ -1,5 +1,11 @@
 from pathlib import Path
-from agentic_rag.feedback.store import FeedbackEntry, save, get_all, update_category
+from agentic_rag.feedback.store import (
+    FeedbackEntry,
+    FeedbackSource,
+    get_all,
+    save,
+    update_category,
+)
 
 
 def test_save_and_get_all(tmp_path: Path) -> None:
@@ -7,7 +13,7 @@ def test_save_and_get_all(tmp_path: Path) -> None:
     entry = FeedbackEntry(
         query="What is ML?",
         answer="Machine learning is...",
-        sources=[{"title": "ML Basics", "content": "ML intro.", "score": 0.05}],
+        sources=[FeedbackSource(title="ML Basics", content="ML intro.", score=0.05)],
         top_score=0.05,
         rating=1,
     )
@@ -18,7 +24,7 @@ def test_save_and_get_all(tmp_path: Path) -> None:
     assert all_entries[0].query == "What is ML?"
     assert all_entries[0].rating == 1
     assert all_entries[0].sources == [
-        {"title": "ML Basics", "content": "ML intro.", "score": 0.05}
+        FeedbackSource(title="ML Basics", content="ML intro.", score=0.05)
     ]
 
 
@@ -99,3 +105,29 @@ def test_legacy_table_gets_top_similarity_column(tmp_path: Path) -> None:
     entries = get_all(db_path=db)
     assert entries[0].query == "old q"
     assert entries[0].top_similarity is None
+
+
+def _raw_insert(db: Path, sources_json: str, category: str, rating: int = -1) -> None:
+    import sqlite3
+
+    get_all(db_path=db)  # create table
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            "INSERT INTO feedback (timestamp, query, answer, sources, top_score, rating, category) "
+            "VALUES ('t', 'q', 'a', ?, 0.0, ?, ?)",
+            (sources_json, rating, category),
+        )
+
+
+def test_legacy_source_json_with_extra_keys_is_read(tmp_path: Path) -> None:
+    db = tmp_path / "f.db"
+    _raw_insert(db, '[{"title": "T", "url": "https://x", "index": 1}]', "")
+    assert get_all(db_path=db)[0].sources == [
+        FeedbackSource(title="T", content="", score=0.0)
+    ]
+
+
+def test_unexpected_category_in_db_reads_as_unknown(tmp_path: Path) -> None:
+    db = tmp_path / "f.db"
+    _raw_insert(db, "[]", "hallucination")
+    assert get_all(db_path=db)[0].category == "unknown"

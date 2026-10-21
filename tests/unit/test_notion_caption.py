@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import MagicMock, patch
 
+from agentic_rag.ingestion.chunker import TextBlock
 from agentic_rag.ingestion.notion import NotionIngester
 
 
@@ -67,4 +68,4 @@ def test_image_block_uses_ocr_when_vision_model_empty() -> None:
         lines = asyncio.run(ingester._fetch_text_from_blocks(MagicMock(), None, "b1"))
 
     caption.assert_awaited_once_with(None, "http://x/y.png")
-    assert {"type": "paragraph", "text": "[Image: chart text]"} in lines
+    assert TextBlock("paragraph", "[Image: chart text]") in lines

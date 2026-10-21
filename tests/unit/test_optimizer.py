@@ -1,7 +1,9 @@
 import pytest
 import json
 from pathlib import Path
-from agentic_rag.feedback.store import FeedbackEntry
+from typing import Literal
+
+from agentic_rag.feedback.store import FailureCategory, FeedbackEntry, Rating
 from agentic_rag.feedback.optimizer import (
     OptimizationResult,
     apply_optimization,
@@ -13,9 +15,9 @@ from agentic_rag.feedback.optimizer import (
 
 
 def _entry(
-    rating: int,
+    rating: Rating,
     similarity: float | None,
-    category: str = "",
+    category: FailureCategory | Literal[""] = "",
     query: str = "q",
     answer: str = "a",
 ) -> FeedbackEntry:

@@ -3,11 +3,19 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Literal, get_args
+
+logger = logging.getLogger(__name__)
+
+Rating = Literal[1, -1]  # thumbs up / thumbs down
+FailureCategory = Literal[
+    "retrieval_miss", "synthesis_failure", "missing_content", "unknown"
+]
 
 DB_PATH = Path("data/feedback.db")
 
@@ -27,21 +35,55 @@ CREATE TABLE IF NOT EXISTS feedback (
 """
 
 
+@dataclass(frozen=True)
+class FeedbackSource:
+    """A source shown with a rated answer, as stored in the row's JSON column."""
+
+    title: str
+    content: str = ""
+    score: float = 0.0
+
+
 @dataclass
 class FeedbackEntry:
     query: str
     answer: str
-    sources: list[dict[str, Any]]  # [{title, content, score}]
+    sources: list[FeedbackSource]
     top_score: float  # best final ranking score (cross-encoder logit, or web score)
-    rating: int  # 1 = thumbs up, -1 = thumbs down
+    rating: Rating
     note: str = ""
-    category: str = ""
+    category: FailureCategory | Literal[""] = ""  # "" = not classified (thumbs up)
     # Best query-chunk cosine; None for web answers and rows saved before this column.
     top_similarity: float | None = None
     timestamp: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
     id: int | None = None
+
+
+def _parse_sources(raw_json: str) -> list[FeedbackSource]:
+    """Stored JSON → FeedbackSource; tolerates legacy rows with extra/missing keys."""
+    return [
+        FeedbackSource(
+            title=str(d.get("title", "")),
+            content=str(d.get("content", "")),
+            score=float(d.get("score", 0.0)),
+        )
+        for d in json.loads(raw_json)
+    ]
+
+
+def _parse_category(raw: str) -> FailureCategory | Literal[""]:
+    if raw == "" or raw in get_args(FailureCategory):
+        return raw  # type: ignore[return-value]  # narrowed by the membership check
+    logger.warning("feedback: unexpected category %r in DB; reading as 'unknown'", raw)
+    return "unknown"
+
+
+def _parse_rating(raw: int) -> Rating:
+    if raw not in (1, -1):
+        raise ValueError(f"feedback DB holds invalid rating {raw!r}")
+    return 1 if raw == 1 else -1
 
 
 def _ensure_table(conn: sqlite3.Connection) -> None:
@@ -66,7 +108,7 @@ def save(entry: FeedbackEntry, db_path: Path = DB_PATH) -> int:
                 entry.timestamp,
                 entry.query,
                 entry.answer,
-                json.dumps(entry.sources),
+                json.dumps([asdict(s) for s in entry.sources]),
                 entry.top_score,
                 entry.rating,
                 entry.note,
@@ -95,18 +137,20 @@ def get_all(db_path: Path = DB_PATH) -> list[FeedbackEntry]:
             timestamp=row[1],
             query=row[2],
             answer=row[3],
-            sources=json.loads(row[4]),
+            sources=_parse_sources(row[4]),
             top_score=row[5],
-            rating=row[6],
+            rating=_parse_rating(row[6]),
             note=row[7],
-            category=row[8],
+            category=_parse_category(row[8]),
             top_similarity=row[9],
         )
         for row in rows
     ]
 
 
-def update_category(entry_id: int, category: str, db_path: Path = DB_PATH) -> None:
+def update_category(
+    entry_id: int, category: FailureCategory, db_path: Path = DB_PATH
+) -> None:
     """Write the judge's classification back to the row."""
     with sqlite3.connect(db_path) as conn:
         _ensure_table(conn)

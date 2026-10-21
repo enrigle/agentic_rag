@@ -118,3 +118,12 @@ def test_path_fields_are_paths_for_defaults_and_yaml(tmp_path: Path) -> None:
     cfg = load_config(path=config_file)
     assert isinstance(cfg.chroma_path, Path)
     assert isinstance(cfg.bm25_path, Path)
+
+
+def test_invalid_embed_backend_is_rejected(tmp_path: Path) -> None:
+    import pytest
+
+    config_file = tmp_path / "c.yaml"
+    config_file.write_text("embed_backend: sentence-transformers\n")  # hyphen typo
+    with pytest.raises(ValueError, match="embed_backend"):
+        load_config(path=config_file)
