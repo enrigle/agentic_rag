@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from agentic_rag.pipeline.memory import ConversationMemory
+from agentic_rag.models import ChatMessage
 
 
 @pytest.fixture
@@ -33,8 +34,8 @@ def test_append_adds_user_and_assistant_turns(memory: ConversationMemory) -> Non
     memory.append("t1", "hello", "hi there")
     history = memory.get("t1")
     assert len(history) == 2
-    assert history[0] == {"role": "user", "content": "hello"}
-    assert history[1] == {"role": "assistant", "content": "hi there"}
+    assert history[0] == ChatMessage("user", "hello")
+    assert history[1] == ChatMessage("assistant", "hi there")
 
 
 def test_append_multiple_turns(memory: ConversationMemory) -> None:
@@ -42,8 +43,8 @@ def test_append_multiple_turns(memory: ConversationMemory) -> None:
     memory.append("t1", "q2", "a2")
     history = memory.get("t1")
     assert len(history) == 4
-    assert history[2]["content"] == "q2"
-    assert history[3]["content"] == "a2"
+    assert history[2].content == "q2"
+    assert history[3].content == "a2"
 
 
 # ── thread isolation ──────────────────────────────────────────────────────────
@@ -56,8 +57,8 @@ def test_thread_isolation(memory: ConversationMemory) -> None:
     history_a = memory.get("A")
     history_b = memory.get("B")
 
-    assert all(m["content"] != "q-B" for m in history_a)
-    assert all(m["content"] != "q-A" for m in history_b)
+    assert all(m.content != "q-B" for m in history_a)
+    assert all(m.content != "q-A" for m in history_b)
 
 
 # ── max messages ──────────────────────────────────────────────────────────────
@@ -76,4 +77,4 @@ def test_most_recent_messages_kept(memory: ConversationMemory) -> None:
         memory.append("t1", f"q{i}", f"a{i}")
     history = memory.get("t1")
     last_q = f"q{many - 1}"
-    assert any(m["content"] == last_q for m in history)
+    assert any(m.content == last_q for m in history)

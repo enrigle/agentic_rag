@@ -14,10 +14,22 @@ from agentic_rag.pipeline.coordinator import PipelineCoordinator
 from agentic_rag.pipeline.memory import ConversationMemory
 from agentic_rag.pipeline.synthesizer import Synthesizer
 from agentic_rag.retrieval.reranker import CrossEncoderReranker
+from agentic_rag.models import ChatMessage
+
+
+def _sr(
+    id: str = "",
+    title: str = "",
+    source: str = "",
+    content: str = "",
+    score: float = 0.0,
+    similarity: float | None = None,
+) -> SearchResult:
+    return SearchResult(id, title, source, content, score, similarity)
 
 
 def _make_mock_source(
-    name: str, results: list[dict[str, Any]], score: float = 0.9
+    name: str, results: list[SearchResult], score: float = 0.9
 ) -> MagicMock:
     source = MagicMock()
     source.name = name
@@ -40,18 +52,18 @@ def _identity_reranker() -> MagicMock:
 def _make_coordinator(
     mock_llm: BaseLLM,
     config: RAGConfig,
-    source_results: list[dict[str, Any]] | None = None,
+    source_results: list[SearchResult] | None = None,
     cache: Any = None,
 ) -> PipelineCoordinator:
     if source_results is None:
         source_results = [
-            {
-                "id": "doc1",
-                "title": "Test Doc",
-                "source": "http://example.com",
-                "content": "Test content",
-                "score": 0.9,
-            }
+            _sr(
+                id="doc1",
+                title="Test Doc",
+                source="http://example.com",
+                content="Test content",
+                score=0.9,
+            )
         ]
     mock_source = _make_mock_source("rag", source_results)
     reranker = _identity_reranker()
@@ -135,9 +147,7 @@ async def test_query_stops_when_first_source_has_results(
     sample_config: RAGConfig,
 ) -> None:
     """When first source returns any results, second source is not called."""
-    rag_results = [
-        {"id": "1", "title": "T", "source": "s", "content": "c", "score": 0.02}
-    ]
+    rag_results = [_sr(id="1", title="T", source="s", content="c", score=0.02)]
     first_source = _make_mock_source("rag", rag_results)
     second_source = _make_mock_source("web", [])
 
@@ -160,13 +170,13 @@ async def test_query_falls_through_to_second_source_when_first_is_empty(
 ) -> None:
     """When first source returns no results, second source is called."""
     web_results = [
-        {
-            "id": "2",
-            "title": "Web",
-            "source": "http://web.com",
-            "content": "web content",
-            "score": 0.8,
-        }
+        _sr(
+            id="2",
+            title="Web",
+            source="http://web.com",
+            content="web content",
+            score=0.8,
+        )
     ]
     first_source = _make_mock_source("rag", [])
     second_source = _make_mock_source("web", web_results)
@@ -189,12 +199,8 @@ async def test_query_falls_through_when_reranker_gates_out_first_source(
     sample_config: RAGConfig,
 ) -> None:
     """RAG returns hits but none pass the relevance gate → web source is tried."""
-    rag_results = [
-        {"id": "1", "title": "T", "source": "s", "content": "off-topic", "score": 0.9}
-    ]
-    web_results = [
-        {"id": "2", "title": "Web", "source": "w", "content": "on-topic", "score": 0.8}
-    ]
+    rag_results = [_sr(id="1", title="T", source="s", content="off-topic", score=0.9)]
+    web_results = [_sr(id="2", title="Web", source="w", content="on-topic", score=0.8)]
     first_source = _make_mock_source("rag", rag_results)
     second_source = _make_mock_source("web", web_results)
     reranker = MagicMock(spec=CrossEncoderReranker)
@@ -234,8 +240,8 @@ async def test_query_memory_persists_across_calls(
     await coordinator.query("second question", thread_id="t1")
 
     history = coordinator._memory.get("t1")
-    assert any(m["content"] == "first question" for m in history)
-    assert any(m["content"] == "second question" for m in history)
+    assert any(m.content == "first question" for m in history)
+    assert any(m.content == "second question" for m in history)
 
 
 @pytest.mark.asyncio
@@ -249,8 +255,8 @@ async def test_query_thread_isolation(
 
     history_a = coordinator._memory.get("A")
     history_b = coordinator._memory.get("B")
-    assert all(m["content"] != "thread B question" for m in history_a)
-    assert all(m["content"] != "thread A question" for m in history_b)
+    assert all(m.content != "thread B question" for m in history_a)
+    assert all(m.content != "thread A question" for m in history_b)
 
 
 @pytest.mark.asyncio
@@ -262,21 +268,21 @@ async def test_query_result_carries_similarity(
         mock_llm,
         sample_config,
         source_results=[
-            {
-                "id": "doc1",
-                "title": "T",
-                "source": "kb/1",
-                "content": "c",
-                "score": -2.5,
-                "similarity": 0.74,
-            },
-            {
-                "id": "w",
-                "title": "W",
-                "source": "http://w",
-                "content": "c",
-                "score": 0.9,
-            },
+            _sr(
+                id="doc1",
+                title="T",
+                source="kb/1",
+                content="c",
+                score=-2.5,
+                similarity=0.74,
+            ),
+            _sr(
+                id="w",
+                title="W",
+                source="http://w",
+                content="c",
+                score=0.9,
+            ),
         ],
     )
     result = await coordinator.query("q")
@@ -321,8 +327,8 @@ async def test_cache_hit_still_records_turn_in_memory(
 
     assert result.answer == "cached answer"
     assert coordinator._memory.get("t1") == [
-        {"role": "user", "content": "What is X?"},
-        {"role": "assistant", "content": "cached answer"},
+        ChatMessage("user", "What is X?"),
+        ChatMessage("assistant", "cached answer"),
     ]
 
 

@@ -446,7 +446,7 @@ RAG_CONFIG_PATH       Config file override (set by Docker Compose automatically)
 
 ### Add a new retrieval source
 
-1. Implement the `BaseSource` protocol (`name: str`, `async search(query, ctx) -> list[dict]`).
+1. Implement the `BaseSource` protocol (`name: str`, `gated: bool`, `async search(query, ctx) -> list[SearchResult]`).
    Each dict must have keys: `id`, `source`, `title`, `content`, `score`.
 2. Add an instance to the `sources` list in `create_pipeline()`.
 3. Sources run in order; the first to return non-empty results stops the chain.

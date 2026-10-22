@@ -6,7 +6,7 @@ import logging
 import time
 
 from agentic_rag.llm.base import BaseLLM
-from agentic_rag.models import PipelineContext, QueryResult, SearchResult
+from agentic_rag.models import PipelineContext, QueryResult
 from agentic_rag.observability.langfuse import observation as _lf_obs
 from agentic_rag.pipeline.memory import ConversationMemory
 from agentic_rag.pipeline.sources import BaseSource
@@ -124,20 +124,9 @@ class PipelineCoordinator:
         self._memory.append(thread_id, user_query, ctx.final_answer or "")
         latency_ms = round((time.monotonic() - t0) * 1000, 2)
 
-        sources = [
-            SearchResult(
-                id=r.get("id", ""),
-                title=r.get("title", ""),
-                source=r.get("source", ""),
-                content=r.get("content", ""),
-                score=float(r.get("score", 0.0)),
-                similarity=r.get("similarity"),
-            )
-            for r in ctx.results
-        ]
         result = QueryResult(
             answer=ctx.final_answer or "",
-            sources=sources,
+            sources=list(ctx.results),
             tool_calls_used=ctx.tool_calls,
             latency_ms=latency_ms,
             trace_id=trace_id,

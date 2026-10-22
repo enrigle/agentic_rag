@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
-from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from agentic_rag.models import SearchResult
 from agentic_rag.retrieval.reranker import CrossEncoderReranker
 
 
-def _make_candidates(n: int) -> list[dict[str, Any]]:
-    return [{"id": str(i), "content": f"doc {i}", "score": 0.0} for i in range(n)]
+def _make_candidates(n: int) -> list[SearchResult]:
+    return [
+        SearchResult(id=str(i), title="", source="", content=f"doc {i}", score=0.0)
+        for i in range(n)
+    ]
 
 
 def _make_reranker(min_score: float | None = None) -> CrossEncoderReranker:
@@ -56,7 +59,7 @@ def test_rerank_scores_descending(reranker: CrossEncoderReranker) -> None:
 
     result = reranker.rerank("query", candidates)
 
-    scores = [r["score"] for r in result]
+    scores = [r.score for r in result]
     assert scores == sorted(scores, reverse=True)
 
 
@@ -65,14 +68,14 @@ def test_rerank_score_field_overwritten(reranker: CrossEncoderReranker) -> None:
 
     # More candidates than top_k=3 so the cross-encoder actually runs.
     candidates = _make_candidates(4)
-    candidates[0]["score"] = 999.0
+    candidates[0].score = 999.0
     reranker._model.predict.return_value = np.array([0.42, 0.1, 0.2, 0.3])  # type: ignore[attr-defined]
 
     result = reranker.rerank("query", candidates)
 
     # Top result is candidate 0 (highest predict score) with its score overwritten.
-    assert result[0]["id"] == "0"
-    assert result[0]["score"] == pytest.approx(0.42)
+    assert result[0].id == "0"
+    assert result[0].score == pytest.approx(0.42)
 
 
 def test_rerank_fewer_candidates_than_top_k(reranker: CrossEncoderReranker) -> None:
@@ -94,7 +97,7 @@ def test_rerank_min_score_drops_low_scores() -> None:
 
     result = gated.rerank("query", candidates)
 
-    assert [r["id"] for r in result] == ["1", "3"]  # only scores >= 0.0 survive
+    assert [r.id for r in result] == ["1", "3"]  # only scores >= 0.0 survive
 
 
 def test_rerank_min_score_can_return_empty() -> None:
@@ -121,4 +124,23 @@ def test_rerank_min_score_disables_skip_guard() -> None:
     result = gated.rerank("query", candidates)
 
     gated._model.predict.assert_called_once()  # type: ignore[attr-defined]
-    assert [r["id"] for r in result] == ["0"]
+    assert [r.id for r in result] == ["0"]
+
+
+def test_rerank_returns_new_objects_and_keeps_similarity() -> None:
+    import numpy as np
+
+    gated = _make_reranker(min_score=None)
+    candidates = [
+        SearchResult(
+            id=str(i), title="", source="", content="c", score=0.0, similarity=0.7
+        )
+        for i in range(4)
+    ]
+    gated._model.predict.return_value = np.array([0.1, 0.9, 0.5, 0.3])  # type: ignore[attr-defined]
+
+    result = gated.rerank("query", candidates)
+
+    assert result[0].id == "1" and result[0].score == pytest.approx(0.9)
+    assert all(r.similarity == 0.7 for r in result)
+    assert all(c.score == 0.0 for c in candidates)  # inputs untouched
