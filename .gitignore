@@ -32,3 +32,5 @@ chroma_db/
 bm25_index/
 
 *.db
+# Optimizer output: few-shot examples built from real user questions
+data/feedback_config.json
