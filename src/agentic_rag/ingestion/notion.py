@@ -17,7 +17,7 @@ from notion_client import AsyncClient
 from notion_client.helpers import async_collect_paginated_api
 
 from agentic_rag.config import RAGConfig
-from agentic_rag.ingestion.base import BaseIngester
+from agentic_rag.ingestion.base import BaseIngester, IngestStats
 from agentic_rag.ingestion.chunker import (
     _chunk_text,
     _extract_plain_text,
@@ -216,24 +216,20 @@ class NotionIngester(BaseIngester):
         )
         return total_chunks
 
-    def status(self) -> dict[str, Any]:
-        """Return a summary of what is currently indexed in the collection.
-
-        Returns:
-            A dict with keys: total_chunks, distinct_pages, oldest_edit, newest_edit.
-        """
+    def status(self) -> IngestStats:
+        """Summarise what is currently indexed in the collection."""
         all_chunks = self._collection.get(include=["metadatas"])
         metadatas: list[Mapping[str, Any]] = list(all_chunks["metadatas"] or [])
         page_ids = {m["page_id"] for m in metadatas if m and "page_id" in m}
         times = sorted(
             m["last_edited_time"] for m in metadatas if m and m.get("last_edited_time")
         )
-        return {
-            "total_chunks": len(metadatas),
-            "distinct_pages": len(page_ids),
-            "oldest_edit": times[0] if times else None,
-            "newest_edit": times[-1] if times else None,
-        }
+        return IngestStats(
+            total_chunks=len(metadatas),
+            distinct_pages=len(page_ids),
+            oldest_edit=times[0] if times else None,
+            newest_edit=times[-1] if times else None,
+        )
 
     # ------------------------------------------------------------------
     # Private helpers

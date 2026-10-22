@@ -93,7 +93,8 @@ agentic_rag/
 │       └── ingest.py        # BackgroundIngest: one ingest thread at a time + status
 ├── config/
 │   ├── default.yaml         # Local dev defaults
-│   └── docker.yaml          # Docker-specific overrides (host.docker.internal, redis URL)
+│   ├── docker.yaml          # Docker-specific overrides (host.docker.internal, redis URL)
+│   └── azure.yaml           # Cloud profile: in-process embeddings, Azure OpenAI, no Ollama
 ├── app.py                   # Streamlit UI entry point
 ├── scripts/
 │   ├── ingest.py            # CLI wrapper for NotionIngester
@@ -126,11 +127,11 @@ PipelineCoordinator.query()
     │       └─ cache hit → return immediately (< 5 ms)
     │
     ├─► RAGSource.search()          — HybridRetriever → ChromaDB + BM25 → RRF merge
-    │       └─ results found? → stop source chain
+    │       └─ CrossEncoderReranker.rerank() with the relevance gate (reranker_min_score)
+    │           └─ anything left? → stop source chain
     │
-    ├─► WebSource.search()          — Tavily (only if RAGSource returned nothing)
-    │
-    ├─► CrossEncoderReranker.rerank()  — re-scores all candidates with cross-encoder
+    ├─► WebSource.search()          — Tavily (only if nothing relevant came from the KB)
+    │       └─ CrossEncoderReranker.rerank() without the gate (reorder only)
     │
     ├─► Synthesizer.synthesize()    — builds prompt with context + chat history → LLM
     │
@@ -139,8 +140,14 @@ PipelineCoordinator.query()
     └─► SemanticCache.set()         — stores result + embedding in Redis
 ```
 
-**Why sources stop early:** The first source that returns any results ends the chain. This is an
-explicit design choice over score-based thresholds. The old threshold approach (`web_search_fallback_score`)
+**Why sources stop early:** The first source whose results survive reranking ends the chain. Each
+source is reranked on its own, right after its search. Sources with `gated = True` (the KB) drop
+candidates whose cross-encoder logit is below `retriever.reranker_min_score` (default −8.0,
+calibrated on this KB: real matches score about −1…−7, off-topic queries −10…−12; `null` disables
+the gate). An emptied list falls through to the next source. Ungated sources (web) are only
+reordered: their scores are on another scale and they have no fallback. The gate is keyed on
+`source.gated`, not on list position. Result count, not a raw score, decides the fallback.
+This is an explicit design choice over score-based thresholds on retrieval scores. The old threshold approach (`web_search_fallback_score`)
 failed because RRF scores cap at ~0.033 — the threshold was permanently unreachable. Result-count
 check is reliable: if ChromaDB finds nothing above `min_similarity`, `HybridRetriever` returns `[]`,
 which lets `WebSource` run.
@@ -160,8 +167,9 @@ above `min_similarity`, `HybridRetriever` returns `[]` regardless of BM25 hits.
 
 ```python
 RAGConfig
-├── LLMConfig          (model, embed_model, base_url)
-├── RetrieverConfig    (min_similarity, top_n, rrf_k, bm25_top_k, reranker_model, reranker_top_k, few_shot_max)
+├── LLMConfig          (model, embed_model, base_url, request_timeout)
+├── RetrieverConfig    (min_similarity, top_n, rrf_k, bm25_top_k, reranker_model, reranker_top_k,
+│                       reranker_min_score, few_shot_max)
 ├── IngestionConfig    (chunk_size, chunk_overlap, vision_model)
 ├── GroqConfig         (model, api_key) + is_configured()
 ├── AzureOpenAIConfig  (endpoint, api_key, deployment, api_version) + is_configured()
@@ -223,8 +231,16 @@ Image blocks: if `ingestion.vision_model` is set, download and caption via Ollam
 (e.g. `llava`); otherwise extract visible text with Tesseract OCR. Uses `ollama.AsyncClient` directly — not `Embedder` — because `Embedder.embed()` does
 not support multimodal inputs.
 
+Stored document text is `"{page title}\n\n{chunk}"`, so a page title is searchable by both vector
+and BM25 even when the chunk body never repeats it.
+
 Chunk IDs: `{page_id}_chunk_{i}`. Metadata stored per chunk: `title`, `source` (URL), `page_id`,
-`last_edited_time`.
+`last_edited_time`, `doc_format`. `doc_format` is `INDEX_DOC_FORMAT` (currently 2 = title-prefixed
+chunks). Incremental ingest re-embeds a page whose stored `doc_format` differs, even if its
+`last_edited_time` is unchanged; bump the constant whenever the stored text format changes.
+
+`status()` returns `IngestStats(total_chunks, distinct_pages, oldest_edit, newest_edit)`
+(`scripts/ingest.py --status`).
 
 ### 6.2 Hybrid Search (read path)
 
@@ -235,14 +251,20 @@ Chunk IDs: `{page_id}_chunk_{i}`. Metadata stored per chunk: `title`, `source` (
 4. RRF merge: `_rrf_merge(vector_ids, bm25_ids, k=rrf_k, top_n=top_n)`.
    Score formula: `sum(1 / (k + rank + 1))` over both lists. Default `k=60` (standard RRF constant).
 5. Fetch documents for BM25-only IDs from ChromaDB (they have no embedding score, need content).
-6. Return `SearchResult` list with RRF scores.
+6. Keep one chunk per source page (the best-ranked), so several chunks of one page don't crowd out
+   other pages in the reranker's top-k.
+7. Return `SearchResult` list with RRF scores in `score` and the vector cosine (if any) in
+   `similarity`.
 
 ### 6.3 Reranking
 
 `CrossEncoderReranker.rerank(query, candidates)`:
-- Takes all results from all sources (post-coordinator accumulation).
+- Called once per source, on that source's results (see §4).
 - Scores `(query, doc_content)` pairs with cross-encoder.
-- Returns top `reranker_top_k` (default 5) by cross-encoder score, replacing the RRF score.
+- Returns top `reranker_top_k` (default 5) by cross-encoder score, as copies whose `score` is the
+  logit. With a gate set, candidates below `reranker_min_score` are dropped.
+- Skips the model when there is no gate and the candidates already fit in `top_k` (it could not
+  change which documents are kept).
 
 **Why cross-encoder after RRF:** RRF and vector similarity are bi-encoder — query and doc are
 encoded independently. Cross-encoder attends to both simultaneously, much better at relevance
@@ -431,7 +453,15 @@ Key differences from `config/default.yaml`:
 - `llm.base_url: http://host.docker.internal:11434`
 - `redis.url: redis://redis:6379`
 
-### 14.4 Required Environment Variables
+### 14.4 config/azure.yaml
+
+Profile for a cloud deployment with no Ollama. Select it with `RAG_CONFIG_PATH=config/azure.yaml`.
+- `embed_backend: sentence_transformers` with `BAAI/bge-small-en-v1.5` (in-process embeddings).
+- `llm.base_url: ""`: no Ollama; answers come from Azure OpenAI (or Groq if `GROQ_API_KEY` is set).
+- `azure_openai.endpoint` and `redis.url` (`rediss://…` Azure Cache) are placeholders to fill in.
+- Data paths under `/app/data` as in `docker.yaml`.
+
+### 14.5 Required Environment Variables
 
 ```
 NOTION_TOKEN          Notion integration token (required for ingestion)
@@ -465,7 +495,7 @@ RAG_CONFIG_PATH       Config file override (set by Docker Compose automatically)
 
 ### Add a new ingestion source
 
-1. Implement `BaseIngester` protocol (`async ingest() -> int`, `status() -> dict`).
+1. Subclass `BaseIngester` (`async ingest(full) -> int`, `status() -> IngestStats`).
 2. After ingestion, call `BM25Retriever.rebuild()` to keep BM25 in sync.
 
 ### Add a new vector store
