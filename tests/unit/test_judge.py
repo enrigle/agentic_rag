@@ -1,6 +1,7 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 from agentic_rag.feedback.judge import classify_failure
+from agentic_rag.feedback.store import FeedbackSource
 
 
 def _mock_llm(response: str) -> MagicMock:
@@ -16,11 +17,9 @@ async def test_classify_retrieval_miss() -> None:
         query="What is the capital of France?",
         answer="I don't know.",
         sources=[
-            {
-                "title": "Python docs",
-                "content": "Python is a language.",
-                "score": 0.01,
-            }
+            FeedbackSource(
+                title="Python docs", content="Python is a language.", score=0.01
+            )
         ],
     )
     assert result == "retrieval_miss"
@@ -33,11 +32,9 @@ async def test_classify_synthesis_failure() -> None:
         query="How does RRF work?",
         answer="RRF stands for...",
         sources=[
-            {
-                "title": "RRF paper",
-                "content": "Reciprocal Rank Fusion...",
-                "score": 0.05,
-            }
+            FeedbackSource(
+                title="RRF paper", content="Reciprocal Rank Fusion...", score=0.05
+            )
         ],
     )
     assert result == "synthesis_failure"

@@ -6,11 +6,17 @@ import json
 import logging
 from typing import Any
 
+from agentic_rag.feedback.store import FailureCategory, FeedbackSource
 from agentic_rag.llm.base import ChatModel
 
 logger = logging.getLogger(__name__)
 
-_VALID_CATEGORIES = {"retrieval_miss", "synthesis_failure", "missing_content"}
+# LLM output → typed category. "unknown" is never accepted from the model.
+_CATEGORIES: dict[str, FailureCategory] = {
+    "retrieval_miss": "retrieval_miss",
+    "synthesis_failure": "synthesis_failure",
+    "missing_content": "missing_content",
+}
 
 _PROMPT_TEMPLATE = """\
 You are evaluating a RAG system response. Classify why it failed.
@@ -32,8 +38,8 @@ async def classify_failure(
     llm: ChatModel,
     query: str,
     answer: str,
-    sources: list[dict[str, Any]],
-) -> str:
+    sources: list[FeedbackSource],
+) -> FailureCategory:
     """Classify a thumbs-down response. Returns one of three categories or 'unknown'.
 
     ``llm`` is the pipeline's answer-writing model (see make_synth_llm), so the
@@ -41,7 +47,7 @@ async def classify_failure(
     """
     sources_block = (
         "\n".join(
-            f'  {i + 1}. "{s.get("title", "")}" — "{str(s.get("content", ""))[:350]}..."'
+            f'  {i + 1}. "{s.title}" — "{s.content[:350]}..."'
             for i, s in enumerate(sources)
         )
         or "  (no sources)"
@@ -61,11 +67,10 @@ async def classify_failure(
             logger.warning("judge: no JSON object found in response")
             return "unknown"
         parsed: dict[str, Any] = json.loads(text[start:end])
-        category: str = parsed.get("category", "unknown")
-        if category not in _VALID_CATEGORIES:
-            logger.warning(
-                "judge: unexpected category %r; defaulting to unknown", category
-            )
+        raw = parsed.get("category")
+        category = _CATEGORIES.get(raw) if isinstance(raw, str) else None
+        if category is None:
+            logger.warning("judge: unexpected category %r; defaulting to unknown", raw)
             return "unknown"
         return category
     except (json.JSONDecodeError, KeyError, ValueError):

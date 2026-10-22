@@ -6,7 +6,7 @@ import re
 from typing import Any
 from urllib.parse import urlparse
 
-from agentic_rag.feedback.store import FeedbackEntry
+from agentic_rag.feedback.store import FeedbackEntry, FeedbackSource, Rating
 from agentic_rag.models import QueryResult
 from agentic_rag.observability.langfuse import score_trace
 
@@ -52,18 +52,18 @@ def source_markdown(index: int, title: str, url: str) -> str:
 
 
 def feedback_entry(
-    query: str, result: dict[str, Any], rating: int, note: str = ""
+    query: str, result: dict[str, Any], rating: Rating, note: str = ""
 ) -> FeedbackEntry:
     """Build the feedback row for a rated answer (result from to_result_dict)."""
     return FeedbackEntry(
         query=query,
         answer=result["answer"],
         sources=[
-            {
-                "title": s["title"],
-                "content": s.get("content", ""),
-                "score": s.get("score", 0.0),
-            }
+            FeedbackSource(
+                title=s["title"],
+                content=s.get("content", ""),
+                score=s.get("score", 0.0),
+            )
             for s in result["sources"]
         ],
         top_score=result.get("top_score", 0.0),
@@ -73,7 +73,7 @@ def feedback_entry(
     )
 
 
-def score_feedback(result: dict[str, Any], rating: int, note: str = "") -> None:
+def score_feedback(result: dict[str, Any], rating: Rating, note: str = "") -> None:
     """Mirror a saved thumbs rating onto the answer's Langfuse trace (no-op if untraced)."""
     if result.get("trace_id"):
         score_trace(

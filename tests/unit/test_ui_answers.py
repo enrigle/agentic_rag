@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+from agentic_rag.feedback.store import FeedbackSource
 from agentic_rag.models import QueryResult, SearchResult
 from agentic_rag.ui import answers
 
@@ -63,5 +64,5 @@ def test_feedback_entry_copies_sources_and_scores() -> None:
         -1,
         "off",
     )
-    assert entry.sources == [{"title": "t", "content": "c", "score": -2.0}]
+    assert entry.sources == [FeedbackSource(title="t", content="c", score=-2.0)]
     assert (entry.top_score, entry.top_similarity) == (-2.0, 0.7)

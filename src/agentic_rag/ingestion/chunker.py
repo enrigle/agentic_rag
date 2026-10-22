@@ -23,6 +23,14 @@ RICH_TEXT_BLOCK_TYPES = {
 HEADING_BLOCK_TYPES = {"heading_1", "heading_2", "heading_3"}
 
 
+@dataclass(frozen=True)
+class TextBlock:
+    """Plain text of one Notion block plus its type, so headings can be told apart."""
+
+    type: str
+    text: str
+
+
 @dataclass(slots=True)
 class _ChunkBuffer:
     chunks: list[str]
@@ -127,7 +135,7 @@ def _split_long_text(text: str, size: int, overlap: int) -> list[str]:
 
 
 def _chunk_text(
-    blocks: list[dict[str, str]],
+    blocks: list[TextBlock],
     size: int = 800,
     overlap: int = 100,
 ) -> list[str]:
@@ -145,11 +153,10 @@ def _chunk_text(
     tagged: list[tuple[str, str]] = []
     current_heading = ""
     for block in blocks:
-        block_type = block.get("type", "")
-        text = block.get("text", "").strip()
+        text = block.text.strip()
         if not text:
             continue
-        if block_type in HEADING_BLOCK_TYPES:
+        if block.type in HEADING_BLOCK_TYPES:
             current_heading = text
         else:
             tagged.append((current_heading, text))

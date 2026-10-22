@@ -7,11 +7,13 @@ import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional, TypeVar
+from typing import Any, Literal, Optional, TypeVar, get_args
 
 import yaml
 
 logger = logging.getLogger(__name__)
+
+EmbedBackend = Literal["ollama", "sentence_transformers"]
 
 # Package root is two levels up from this file: src/agentic_rag/config.py
 _PACKAGE_ROOT = Path(__file__).parent.parent.parent
@@ -82,7 +84,7 @@ class RAGConfig:
     bm25_path: Path = Path("./bm25_index")
     collection_name: str = "notion_kb"
     max_tool_calls: int = 5
-    embed_backend: str = "ollama"  # "ollama" | "sentence_transformers"
+    embed_backend: EmbedBackend = "ollama"
     llm: LLMConfig = field(default_factory=LLMConfig)
     retriever: RetrieverConfig = field(default_factory=RetrieverConfig)
     ingestion: IngestionConfig = field(default_factory=IngestionConfig)
@@ -148,6 +150,13 @@ def load_config(path: Path | None = None) -> RAGConfig:
         "embed_backend",
     }
     top_level = {k: v for k, v in raw.items() if k in top_level_keys}
+    backend = top_level.get("embed_backend", "ollama")
+    if backend not in get_args(EmbedBackend):
+        # Fail fast: a typo here used to fall back to Ollama without any message.
+        raise ValueError(
+            f"{resolved}: embed_backend must be one of {get_args(EmbedBackend)}, "
+            f"got {backend!r}"
+        )
     for key in ("chroma_path", "bm25_path"):
         if isinstance(top_level.get(key), str):
             top_level[key] = Path(top_level[key])
