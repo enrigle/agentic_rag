@@ -17,7 +17,6 @@ from agentic_rag.feedback.store import FeedbackEntry
 logger = logging.getLogger(__name__)
 
 _MIN_SCORE_SEPARATION = 0.05  # ignore signal if medians are this close
-FEEDBACK_CONFIG_PATH = Path("data/feedback_config.json")  # read by Synthesizer
 
 
 @dataclass
@@ -110,8 +109,8 @@ def get_kb_gaps(entries: list[FeedbackEntry]) -> list[str]:
 
 def apply_optimization(
     entries: list[FeedbackEntry],
+    feedback_config_path: Path,
     config_path: Path | None = None,
-    feedback_config_path: Path = FEEDBACK_CONFIG_PATH,
     few_shot_max: int = 3,
 ) -> OptimizationResult:
     """Run all three optimizations and persist results to disk.

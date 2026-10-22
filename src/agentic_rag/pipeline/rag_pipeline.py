@@ -6,7 +6,6 @@ import logging
 
 from agentic_rag.cache.semantic_cache import SemanticCache
 from agentic_rag.config import RAGConfig, load_config
-from agentic_rag.feedback.optimizer import FEEDBACK_CONFIG_PATH
 from agentic_rag.llm.base import ChatModel, Embedder
 from agentic_rag.llm.ollama import OllamaLLM
 from agentic_rag.llm.openai_compat import AzureOpenAILLM, GroqLLM
@@ -78,7 +77,7 @@ def create_pipeline(config: RAGConfig | None = None) -> PipelineCoordinator:
             top_k=config.retriever.reranker_top_k,
             min_score=config.retriever.reranker_min_score,
         ),
-        synthesizer=Synthesizer(synth_llm, few_shot_path=FEEDBACK_CONFIG_PATH),
+        synthesizer=Synthesizer(synth_llm, few_shot_path=config.feedback_config_path),
         memory=ConversationMemory(),
         max_tool_calls=config.max_tool_calls,
         cache=cache,

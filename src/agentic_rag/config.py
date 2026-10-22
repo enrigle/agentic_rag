@@ -80,8 +80,11 @@ class RedisConfig:
 
 @dataclass
 class RAGConfig:
+    # Relative paths are resolved against the project root by load_config().
     chroma_path: Path = Path("./chroma_db")
     bm25_path: Path = Path("./bm25_index")
+    feedback_db_path: Path = Path("data/feedback.db")
+    feedback_config_path: Path = Path("data/feedback_config.json")  # few-shot examples
     collection_name: str = "notion_kb"
     max_tool_calls: int = 5
     embed_backend: EmbedBackend = "ollama"
@@ -110,7 +113,30 @@ def resolve_config_path(path: Path | None = None) -> Path:
     return Path(env_path) if env_path else _DEFAULT_CONFIG_PATH
 
 
+_PATH_FIELDS = ("chroma_path", "bm25_path", "feedback_db_path", "feedback_config_path")
+
+
+def _anchor(p: Path) -> Path:
+    return p if p.is_absolute() else _PACKAGE_ROOT / p
+
+
+def _resolve_paths(cfg: RAGConfig) -> RAGConfig:
+    """Anchor relative data paths at the project root, not the process CWD."""
+    return dataclasses.replace(
+        cfg,
+        chroma_path=_anchor(cfg.chroma_path),
+        bm25_path=_anchor(cfg.bm25_path),
+        feedback_db_path=_anchor(cfg.feedback_db_path),
+        feedback_config_path=_anchor(cfg.feedback_config_path),
+    )
+
+
 def load_config(path: Path | None = None) -> RAGConfig:
+    """Load RAGConfig from YAML (see _load_unresolved) with data paths resolved."""
+    return _resolve_paths(_load_unresolved(path))
+
+
+def _load_unresolved(path: Path | None = None) -> RAGConfig:
     """Load RAGConfig from YAML, falling back to defaults for missing keys.
 
     Args:
@@ -143,8 +169,7 @@ def load_config(path: Path | None = None) -> RAGConfig:
     redis_cfg = _parse_sub(RedisConfig, raw.get("redis") or {})
 
     top_level_keys = {
-        "chroma_path",
-        "bm25_path",
+        *_PATH_FIELDS,
         "collection_name",
         "max_tool_calls",
         "embed_backend",
@@ -157,7 +182,7 @@ def load_config(path: Path | None = None) -> RAGConfig:
             f"{resolved}: embed_backend must be one of {get_args(EmbedBackend)}, "
             f"got {backend!r}"
         )
-    for key in ("chroma_path", "bm25_path"):
+    for key in _PATH_FIELDS:
         if isinstance(top_level.get(key), str):
             top_level[key] = Path(top_level[key])
 

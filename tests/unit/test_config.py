@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 
-from agentic_rag.config import RAGConfig, load_config
+
+from agentic_rag.config import _PACKAGE_ROOT, RAGConfig, load_config
 
 
 def test_load_config_no_path_returns_defaults() -> None:
@@ -21,7 +23,7 @@ def test_load_config_nonexistent_path_returns_defaults(tmp_path: Path) -> None:
     assert isinstance(cfg, RAGConfig)
     # Should match defaults
     defaults = RAGConfig()
-    assert cfg.chroma_path == defaults.chroma_path
+    assert cfg.chroma_path == _PACKAGE_ROOT / defaults.chroma_path
     assert cfg.collection_name == defaults.collection_name
 
 
@@ -36,8 +38,8 @@ max_tool_calls: 10
     config_file.write_text(yaml_content)
 
     cfg = load_config(path=config_file)
-    assert cfg.chroma_path == Path("./custom_chroma")
-    assert cfg.bm25_path == Path("./custom_bm25")
+    assert cfg.chroma_path == _PACKAGE_ROOT / "custom_chroma"
+    assert cfg.bm25_path == _PACKAGE_ROOT / "custom_bm25"
     assert cfg.collection_name == "my_collection"
     assert cfg.max_tool_calls == 10
 
@@ -53,7 +55,7 @@ another_unknown: 42
 
     cfg = load_config(path=config_file)
     assert isinstance(cfg, RAGConfig)
-    assert cfg.chroma_path == Path("./chroma")
+    assert cfg.chroma_path == _PACKAGE_ROOT / "chroma"
 
 
 def test_load_config_nested_llm_model_parsed(tmp_path: Path) -> None:
@@ -107,7 +109,7 @@ def test_load_config_empty_yaml_returns_defaults(tmp_path: Path) -> None:
     cfg = load_config(path=config_file)
     assert isinstance(cfg, RAGConfig)
     defaults = RAGConfig()
-    assert cfg.chroma_path == defaults.chroma_path
+    assert cfg.chroma_path == _PACKAGE_ROOT / defaults.chroma_path
 
 
 def test_path_fields_are_paths_for_defaults_and_yaml(tmp_path: Path) -> None:
@@ -127,3 +129,30 @@ def test_invalid_embed_backend_is_rejected(tmp_path: Path) -> None:
     config_file.write_text("embed_backend: sentence-transformers\n")  # hyphen typo
     with pytest.raises(ValueError, match="embed_backend"):
         load_config(path=config_file)
+
+
+def test_relative_data_paths_resolve_against_project_root(
+    tmp_path: Path, monkeypatch: "pytest.MonkeyPatch"
+) -> None:
+    # Starting the app from another folder must not create a second, empty DB.
+    from agentic_rag.config import _PACKAGE_ROOT
+
+    config_file = tmp_path / "c.yaml"
+    config_file.write_text(
+        "chroma_path: ./chroma_db\nbm25_path: /abs/bm25\n"
+        "feedback_db_path: data/feedback.db\n"
+    )
+    monkeypatch.chdir(tmp_path)
+    cfg = load_config(path=config_file)
+    assert cfg.chroma_path == _PACKAGE_ROOT / "chroma_db"
+    assert cfg.bm25_path == Path("/abs/bm25")  # absolute paths untouched
+    assert cfg.feedback_db_path == _PACKAGE_ROOT / "data" / "feedback.db"
+    assert cfg.feedback_config_path == _PACKAGE_ROOT / "data" / "feedback_config.json"
+
+
+def test_defaults_resolve_when_config_file_missing(tmp_path: Path) -> None:
+    from agentic_rag.config import _PACKAGE_ROOT
+
+    cfg = load_config(path=tmp_path / "missing.yaml")
+    assert cfg.feedback_db_path == _PACKAGE_ROOT / "data" / "feedback.db"
+    assert cfg.chroma_path.is_absolute()
