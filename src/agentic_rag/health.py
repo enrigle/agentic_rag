@@ -46,8 +46,8 @@ def _check_groq() -> ServiceStatus:
     return ServiceStatus("Groq", False, "GROQ_API_KEY not set — using configured LLM")
 
 
-def _check_chromadb(chroma_path: str) -> ServiceStatus:
-    if Path(chroma_path).exists():
+def _check_chromadb(chroma_path: Path) -> ServiceStatus:
+    if chroma_path.exists():
         return ServiceStatus("ChromaDB", True)
     return ServiceStatus("ChromaDB", False, "No index found — sync Notion first")
 
@@ -55,7 +55,7 @@ def _check_chromadb(chroma_path: str) -> ServiceStatus:
 async def run_checks(
     ollama_url: str,
     redis_url: str,
-    chroma_path: str,
+    chroma_path: Path,
     embed_backend: str = "ollama",
     synth_uses_ollama: bool = True,
 ) -> list[ServiceStatus]:

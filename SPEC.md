@@ -81,14 +81,12 @@ agentic_rag/
 │   │   ├── rag_pipeline.py  # create_pipeline() factory
 │   │   ├── sources.py       # BaseSource protocol, RAGSource, WebSource
 │   │   └── synthesizer.py   # Synthesizer: formats prompt + calls LLM
-│   ├── retrieval/
-│   │   ├── base.py          # BaseVectorStore + BaseKeywordRetriever protocols
-│   │   ├── bm25.py          # BM25Retriever (loads saved bm25s index; reloads if rebuilt on disk)
-│   │   ├── chroma.py        # ChromaVectorStore
-│   │   ├── hybrid.py        # HybridRetriever: RRF merge of vector + BM25
-│   │   └── reranker.py      # CrossEncoderReranker
-│   └── utils/
-│       └── errors.py        # Custom exception types
+│   └── retrieval/
+│       ├── base.py          # BaseVectorStore + BaseKeywordRetriever protocols
+│       ├── bm25.py          # BM25Retriever (loads saved bm25s index; reloads if rebuilt on disk)
+│       ├── chroma.py        # ChromaVectorStore
+│       ├── hybrid.py        # HybridRetriever: RRF merge of vector + BM25
+│       └── reranker.py      # CrossEncoderReranker
 ├── config/
 │   ├── default.yaml         # Local dev defaults
 │   └── docker.yaml          # Docker-specific overrides (host.docker.internal, redis URL)

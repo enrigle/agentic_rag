@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -20,7 +21,7 @@ async def _names(embed_backend: str, synth_uses_ollama: bool) -> list[str]:
         statuses = await health.run_checks(
             ollama_url="http://x",
             redis_url="redis://x",
-            chroma_path="/nonexistent",
+            chroma_path=Path("/nonexistent"),
             embed_backend=embed_backend,
             synth_uses_ollama=synth_uses_ollama,
         )

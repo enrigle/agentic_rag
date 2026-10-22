@@ -36,8 +36,8 @@ max_tool_calls: 10
     config_file.write_text(yaml_content)
 
     cfg = load_config(path=config_file)
-    assert cfg.chroma_path == "./custom_chroma"
-    assert cfg.bm25_path == "./custom_bm25"
+    assert cfg.chroma_path == Path("./custom_chroma")
+    assert cfg.bm25_path == Path("./custom_bm25")
     assert cfg.collection_name == "my_collection"
     assert cfg.max_tool_calls == 10
 
@@ -53,7 +53,7 @@ another_unknown: 42
 
     cfg = load_config(path=config_file)
     assert isinstance(cfg, RAGConfig)
-    assert cfg.chroma_path == "./chroma"
+    assert cfg.chroma_path == Path("./chroma")
 
 
 def test_load_config_nested_llm_model_parsed(tmp_path: Path) -> None:
@@ -108,3 +108,13 @@ def test_load_config_empty_yaml_returns_defaults(tmp_path: Path) -> None:
     assert isinstance(cfg, RAGConfig)
     defaults = RAGConfig()
     assert cfg.chroma_path == defaults.chroma_path
+
+
+def test_path_fields_are_paths_for_defaults_and_yaml(tmp_path: Path) -> None:
+    assert isinstance(RAGConfig().chroma_path, Path)
+    assert isinstance(RAGConfig().bm25_path, Path)
+    config_file = tmp_path / "c.yaml"
+    config_file.write_text("chroma_path: ./x\nbm25_path: ./y\n")
+    cfg = load_config(path=config_file)
+    assert isinstance(cfg.chroma_path, Path)
+    assert isinstance(cfg.bm25_path, Path)

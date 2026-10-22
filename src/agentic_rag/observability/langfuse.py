@@ -7,9 +7,12 @@ All helpers are no-ops if credentials are absent or the package is unavailable.
 from __future__ import annotations
 
 import contextlib
+import logging
 import os
 from functools import lru_cache
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 def langfuse_enabled() -> bool:
@@ -33,7 +36,8 @@ def get_client() -> Any | None:
         if host:
             kwargs["host"] = host
         return Langfuse(**kwargs)
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001 — tracing must never break the app
+        logger.warning("Langfuse disabled: client init failed: %s", exc)
         return None
 
 
@@ -70,7 +74,8 @@ def observation(
 
     try:
         obs_ctx = client.start_as_current_observation(**kwargs)
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001 — tracing must never break the app
+        logger.warning("Langfuse: could not start observation %r: %s", name, exc)
         yield None
         return
 
@@ -104,5 +109,5 @@ def score_trace(
             score_kwargs["comment"] = comment
         client.create_score(**score_kwargs)
         client.flush()
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as exc:  # noqa: BLE001 — tracing must never break the app
+        logger.warning("Langfuse: could not score trace %s: %s", trace_id, exc)

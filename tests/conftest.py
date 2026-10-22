@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock
@@ -22,8 +23,8 @@ for _key in ("LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY"):
 @pytest.fixture
 def sample_config() -> RAGConfig:
     return RAGConfig(
-        chroma_path="./test_chroma_db",
-        bm25_path="./test_bm25_index",
+        chroma_path=Path("./test_chroma_db"),
+        bm25_path=Path("./test_bm25_index"),
         collection_name="test_kb",
         max_tool_calls=3,
         llm=LLMConfig(model="test-model", embed_model="test-embed"),
@@ -57,7 +58,6 @@ def mock_vector_store(sample_search_results: list[SearchResult]) -> BaseVectorSt
     store = MagicMock(spec=BaseVectorStore)
     store.search = AsyncMock(return_value=sample_search_results)
     store.fetch_by_ids = AsyncMock(return_value=sample_search_results)
-    store.upsert = MagicMock()
     return store
 
 

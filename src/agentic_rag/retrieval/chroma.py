@@ -20,7 +20,7 @@ class ChromaVectorStore(BaseVectorStore):
 
     def __init__(self, config: RAGConfig) -> None:
         self._min_similarity: float = config.retriever.min_similarity
-        client = chromadb.PersistentClient(path=config.chroma_path)
+        client = chromadb.PersistentClient(path=str(config.chroma_path))
         self._collection = client.get_or_create_collection(
             config.collection_name,
             metadata={"hnsw:space": "cosine"},
@@ -116,35 +116,3 @@ class ChromaVectorStore(BaseVectorStore):
                 fetched["ids"], fetched["documents"], fetched["metadatas"]
             )
         ]
-
-    def upsert(
-        self,
-        ids: list[str],
-        embeddings: list[list[float]],
-        documents: list[str],
-        metadatas: list[dict[str, Any]],
-    ) -> None:
-        """Upsert documents into the collection.
-
-        Args:
-            ids: Document IDs.
-            embeddings: Corresponding embedding vectors.
-            documents: Raw document text.
-            metadatas: Per-document metadata dicts.
-        """
-        if not ids:
-            logger.warning("ChromaVectorStore.upsert: called with empty ids — no-op")
-            return
-        if not (len(ids) == len(embeddings) == len(documents) == len(metadatas)):
-            raise ValueError(
-                f"upsert: parallel lists must be equal length, got "
-                f"ids={len(ids)}, embeddings={len(embeddings)}, "
-                f"documents={len(documents)}, metadatas={len(metadatas)}"
-            )
-        self._collection.upsert(
-            ids=ids,
-            embeddings=embeddings,  # type: ignore[arg-type]
-            documents=documents,
-            metadatas=metadatas,  # type: ignore[arg-type]
-        )
-        logger.info("ChromaVectorStore.upsert: upserted %d documents", len(ids))
