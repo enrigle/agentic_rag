@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 from agentic_rag.config import RAGConfig, LLMConfig, RetrieverConfig
 from agentic_rag.models import SearchResult
-from agentic_rag.llm.base import BaseLLM
+from agentic_rag.llm.ollama import OllamaLLM
 from agentic_rag.retrieval.base import BaseVectorStore, BaseKeywordRetriever
 
 # Tests must never ship traces to the real Langfuse project. app.py calls
@@ -33,8 +33,8 @@ def sample_config() -> RAGConfig:
 
 
 @pytest.fixture
-def mock_llm() -> BaseLLM:
-    llm = MagicMock(spec=BaseLLM)
+def mock_llm() -> MagicMock:
+    llm = MagicMock(spec=OllamaLLM)
     llm.chat = AsyncMock(return_value="Here is the answer.")
     llm.embed = AsyncMock(return_value=[0.1, 0.2, 0.3])
     return llm

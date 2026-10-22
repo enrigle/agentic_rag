@@ -31,7 +31,7 @@ from agentic_rag.ingestion.notion import NotionIngester
 from agentic_rag.models import QueryResult
 from agentic_rag.observability.langfuse import score_trace
 from agentic_rag.pipeline.coordinator import PipelineCoordinator
-from agentic_rag.llm.base import BaseLLM
+from agentic_rag.llm.base import ChatModel
 from agentic_rag.pipeline.rag_pipeline import (
     create_pipeline,
     make_embed_llm,
@@ -135,7 +135,7 @@ def get_pipeline() -> PipelineCoordinator:
 
 
 @st.cache_resource(show_spinner=False)
-def get_judge_llm() -> BaseLLM:
+def get_judge_llm() -> ChatModel:
     return make_synth_llm(load_config())
 
 

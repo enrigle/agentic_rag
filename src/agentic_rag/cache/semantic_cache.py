@@ -12,14 +12,14 @@ import numpy as np
 import redis.asyncio as aioredis
 
 from agentic_rag.config import RedisConfig
-from agentic_rag.llm.base import BaseLLM
+from agentic_rag.llm.base import Embedder
 from agentic_rag.models import QueryResult, SearchResult
 
 logger = logging.getLogger(__name__)
 
 
 class SemanticCache:
-    def __init__(self, config: RedisConfig, embed_llm: BaseLLM) -> None:
+    def __init__(self, config: RedisConfig, embed_llm: Embedder) -> None:
         self._config = config
         self._embed_llm = embed_llm
         self._redis: aioredis.Redis = aioredis.Redis.from_url(

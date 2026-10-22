@@ -194,7 +194,7 @@ src/agentic_rag/
 ├── ingestion/         # Notion fetching, chunking, embedding (+ image captioning)
 ├── retrieval/         # ChromaDB, BM25, hybrid RRF, cross-encoder reranker
 ├── pipeline/          # PipelineCoordinator, sources, synthesizer, memory
-├── llm/               # BaseLLM, OllamaLLM, OpenAICompatLLM (Groq + Azure)
+├── llm/               # Embedder/ChatModel protocols, OllamaLLM, OpenAICompatLLM (Groq + Azure)
 ├── health.py          # startup dependency checks
 ├── feedback/          # Store + judge + optimizer (feedback loop)
 ├── observability/     # Langfuse tracing/scoring

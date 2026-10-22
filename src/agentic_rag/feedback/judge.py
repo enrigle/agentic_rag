@@ -6,7 +6,7 @@ import json
 import logging
 from typing import Any
 
-from agentic_rag.llm.base import BaseLLM
+from agentic_rag.llm.base import ChatModel
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +29,7 @@ Respond with JSON only, no other text: {{"category": "..."}}"""
 
 
 async def classify_failure(
-    llm: BaseLLM,
+    llm: ChatModel,
     query: str,
     answer: str,
     sources: list[dict[str, Any]],

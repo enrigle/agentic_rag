@@ -69,7 +69,7 @@ agentic_rag/
 │   │   ├── chunker.py       # _chunk_text, _extract_plain_text, _get_title
 │   │   └── notion.py        # NotionIngester: Notion → ChromaDB + BM25
 │   ├── llm/
-│   │   ├── base.py          # BaseLLM (abstract: chat + embed)
+│   │   ├── base.py          # Embedder + ChatModel protocols
 │   │   ├── ollama.py        # OllamaLLM — local; default embed backend
 │   │   ├── sentence_transformers_llm.py  # SentenceTransformersLLM — embed-only backend
 │   │   └── openai_compat.py # OpenAICompatLLM base + AzureOpenAILLM + GroqLLM
@@ -216,7 +216,7 @@ write and query vectors in the same embedding space. `OpenAICompatLLM.embed()` r
    `search()` — no process restart needed after an in-app sync).
 
 Image blocks: if `ingestion.vision_model` is set, download and caption via Ollama vision model
-(e.g. `llava`); otherwise extract visible text with Tesseract OCR. Uses `ollama.AsyncClient` directly — not `BaseLLM` — because `BaseLLM.embed()` does
+(e.g. `llava`); otherwise extract visible text with Tesseract OCR. Uses `ollama.AsyncClient` directly — not `Embedder` — because `Embedder.embed()` does
 not support multimodal inputs.
 
 Chunk IDs: `{page_id}_chunk_{i}`. Metadata stored per chunk: `title`, `source` (URL), `page_id`,
@@ -248,10 +248,18 @@ ranking. Running it over a small candidate set (top_n=20 → reranker_top_k=5) i
 
 ## 7. LLM Backends
 
-### 7.1 `BaseLLM` (abstract)
+### 7.1 `Embedder` and `ChatModel` (Protocols)
 
-Two methods: `async chat(prompt: str) -> str` and `async embed(text: str) -> list[float]`.
-Errors: `ValueError` for empty/null response, `RuntimeError` for network/backend failure.
+One Protocol per job: `Embedder.embed(text: str) -> list[float]` and
+`ChatModel.chat(prompt: str) -> str` (both async). A backend implements only the jobs it can do;
+callers type against the job they use, so mypy rejects pairing an embed-only backend with
+synthesis. Errors: `ValueError` for empty/null response, `RuntimeError` for network/backend failure.
+
+| Backend | Embedder | ChatModel |
+|---|---|---|
+| `OllamaLLM` | yes | yes |
+| `SentenceTransformersLLM` | yes | no |
+| `GroqLLM`, `AzureOpenAILLM` | no (embeddings stay local) | yes |
 
 ### 7.2 `OllamaLLM`
 
@@ -438,11 +446,11 @@ RAG_CONFIG_PATH       Config file override (set by Docker Compose automatically)
 
 ### Add a new LLM backend
 
-1. Subclass `BaseLLM` in `src/agentic_rag/llm/`.
-2. Implement `async chat()` and `async embed()` (or raise `NotImplementedError` for embed if cloud-only).
+1. Add a class in `src/agentic_rag/llm/` (no base class needed; Protocols are structural).
+2. Implement `async chat()` to be a `ChatModel`, `async embed()` to be an `Embedder`, or both.
 3. Add a config dataclass to `config.py` and a field on `RAGConfig`.
 4. Add an `is_configured()` method to the config dataclass.
-5. Wire it in `create_pipeline()` in `pipeline/rag_pipeline.py`.
+5. Wire it in `make_synth_llm()` (chat) or `make_embed_llm()` (embeddings) in `pipeline/rag_pipeline.py`.
 
 ### Add a new retrieval source
 

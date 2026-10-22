@@ -9,7 +9,6 @@ from unittest.mock import AsyncMock, MagicMock
 
 from agentic_rag.config import RAGConfig
 from agentic_rag.models import QueryResult, SearchResult
-from agentic_rag.llm.base import BaseLLM
 from agentic_rag.pipeline.coordinator import PipelineCoordinator
 from agentic_rag.pipeline.memory import ConversationMemory
 from agentic_rag.pipeline.synthesizer import Synthesizer
@@ -50,7 +49,7 @@ def _identity_reranker() -> MagicMock:
 
 
 def _make_coordinator(
-    mock_llm: BaseLLM,
+    mock_llm: MagicMock,
     config: RAGConfig,
     source_results: list[SearchResult] | None = None,
     cache: Any = None,
@@ -80,7 +79,7 @@ def _make_coordinator(
 
 @pytest.mark.asyncio
 async def test_query_returns_query_result(
-    mock_llm: BaseLLM,
+    mock_llm: MagicMock,
     sample_config: RAGConfig,
 ) -> None:
     coordinator = _make_coordinator(mock_llm, sample_config)
@@ -95,18 +94,18 @@ async def test_query_returns_query_result(
 
 @pytest.mark.asyncio
 async def test_query_embeds_once_per_call(
-    mock_llm: BaseLLM,
+    mock_llm: MagicMock,
     sample_config: RAGConfig,
 ) -> None:
     """Query is embedded a single time and reused downstream (no cache attached)."""
     coordinator = _make_coordinator(mock_llm, sample_config)
     await coordinator.query("only embed me once")
-    assert mock_llm.embed.call_count == 1  # type: ignore[attr-defined]
+    assert mock_llm.embed.call_count == 1
 
 
 @pytest.mark.asyncio
 async def test_query_empty_string_raises_value_error(
-    mock_llm: BaseLLM,
+    mock_llm: MagicMock,
     sample_config: RAGConfig,
 ) -> None:
     coordinator = _make_coordinator(mock_llm, sample_config)
@@ -116,7 +115,7 @@ async def test_query_empty_string_raises_value_error(
 
 @pytest.mark.asyncio
 async def test_query_sources_have_correct_types(
-    mock_llm: BaseLLM,
+    mock_llm: MagicMock,
     sample_config: RAGConfig,
 ) -> None:
     coordinator = _make_coordinator(mock_llm, sample_config)
@@ -133,7 +132,7 @@ async def test_query_sources_have_correct_types(
 
 @pytest.mark.asyncio
 async def test_query_tool_calls_used_is_positive(
-    mock_llm: BaseLLM,
+    mock_llm: MagicMock,
     sample_config: RAGConfig,
 ) -> None:
     coordinator = _make_coordinator(mock_llm, sample_config)
@@ -143,7 +142,7 @@ async def test_query_tool_calls_used_is_positive(
 
 @pytest.mark.asyncio
 async def test_query_stops_when_first_source_has_results(
-    mock_llm: BaseLLM,
+    mock_llm: MagicMock,
     sample_config: RAGConfig,
 ) -> None:
     """When first source returns any results, second source is not called."""
@@ -165,7 +164,7 @@ async def test_query_stops_when_first_source_has_results(
 
 @pytest.mark.asyncio
 async def test_query_falls_through_to_second_source_when_first_is_empty(
-    mock_llm: BaseLLM,
+    mock_llm: MagicMock,
     sample_config: RAGConfig,
 ) -> None:
     """When first source returns no results, second source is called."""
@@ -195,7 +194,7 @@ async def test_query_falls_through_to_second_source_when_first_is_empty(
 
 @pytest.mark.asyncio
 async def test_query_falls_through_when_reranker_gates_out_first_source(
-    mock_llm: BaseLLM,
+    mock_llm: MagicMock,
     sample_config: RAGConfig,
 ) -> None:
     """RAG returns hits but none pass the relevance gate → web source is tried."""
@@ -232,7 +231,7 @@ async def test_query_falls_through_when_reranker_gates_out_first_source(
 
 @pytest.mark.asyncio
 async def test_query_memory_persists_across_calls(
-    mock_llm: BaseLLM,
+    mock_llm: MagicMock,
     sample_config: RAGConfig,
 ) -> None:
     coordinator = _make_coordinator(mock_llm, sample_config)
@@ -246,7 +245,7 @@ async def test_query_memory_persists_across_calls(
 
 @pytest.mark.asyncio
 async def test_query_thread_isolation(
-    mock_llm: BaseLLM,
+    mock_llm: MagicMock,
     sample_config: RAGConfig,
 ) -> None:
     coordinator = _make_coordinator(mock_llm, sample_config)
@@ -261,7 +260,7 @@ async def test_query_thread_isolation(
 
 @pytest.mark.asyncio
 async def test_query_result_carries_similarity(
-    mock_llm: BaseLLM,
+    mock_llm: MagicMock,
     sample_config: RAGConfig,
 ) -> None:
     coordinator = _make_coordinator(
@@ -298,7 +297,7 @@ def _mock_cache(hit: QueryResult | None = None) -> MagicMock:
 
 @pytest.mark.asyncio
 async def test_follow_up_bypasses_cache(
-    mock_llm: BaseLLM, sample_config: RAGConfig
+    mock_llm: MagicMock, sample_config: RAGConfig
 ) -> None:
     # "What about the second one?" means different things in different threads;
     # a query-only cache key would serve another conversation's answer.
@@ -316,7 +315,7 @@ async def test_follow_up_bypasses_cache(
 
 @pytest.mark.asyncio
 async def test_cache_hit_still_records_turn_in_memory(
-    mock_llm: BaseLLM, sample_config: RAGConfig
+    mock_llm: MagicMock, sample_config: RAGConfig
 ) -> None:
     hit = QueryResult(
         answer="cached answer", sources=[], tool_calls_used=1, latency_ms=1.0
@@ -334,7 +333,7 @@ async def test_cache_hit_still_records_turn_in_memory(
 
 @pytest.mark.asyncio
 async def test_error_answer_is_not_cached(
-    mock_llm: BaseLLM, sample_config: RAGConfig
+    mock_llm: MagicMock, sample_config: RAGConfig
 ) -> None:
     cache = _mock_cache()
     failing = _make_mock_source("rag", [])
@@ -357,7 +356,7 @@ async def test_error_answer_is_not_cached(
 
 @pytest.mark.asyncio
 async def test_query_result_carries_trace_id(
-    mock_llm: BaseLLM, sample_config: RAGConfig
+    mock_llm: MagicMock, sample_config: RAGConfig
 ) -> None:
     import contextlib
     from unittest.mock import patch
@@ -374,7 +373,7 @@ async def test_query_result_carries_trace_id(
 
 @pytest.mark.asyncio
 async def test_trace_id_none_when_tracing_off(
-    mock_llm: BaseLLM, sample_config: RAGConfig
+    mock_llm: MagicMock, sample_config: RAGConfig
 ) -> None:
     import contextlib
     from unittest.mock import patch
@@ -390,7 +389,7 @@ async def test_trace_id_none_when_tracing_off(
 
 @pytest.mark.asyncio
 async def test_upfront_embed_failure_is_logged(
-    mock_llm: BaseLLM, sample_config: RAGConfig, caplog: pytest.LogCaptureFixture
+    mock_llm: MagicMock, sample_config: RAGConfig, caplog: pytest.LogCaptureFixture
 ) -> None:
     import logging
 

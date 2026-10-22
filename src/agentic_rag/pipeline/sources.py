@@ -8,7 +8,7 @@ from typing import Any, Protocol, runtime_checkable
 
 from tavily import AsyncTavilyClient
 
-from agentic_rag.llm.base import BaseLLM
+from agentic_rag.llm.base import Embedder
 from agentic_rag.models import PipelineContext, SearchResult
 from agentic_rag.observability.langfuse import observation as _lf_obs
 from agentic_rag.retrieval.hybrid import HybridRetriever
@@ -32,7 +32,7 @@ class RAGSource:
     name = "rag"
     gated = True
 
-    def __init__(self, llm: BaseLLM, hybrid: HybridRetriever) -> None:
+    def __init__(self, llm: Embedder, hybrid: HybridRetriever) -> None:
         self._llm = llm
         self._hybrid = hybrid
 

@@ -121,6 +121,6 @@ async def test_chat_raises_on_empty_choices(llm: AzureOpenAILLM) -> None:
 # ── embed ─────────────────────────────────────────────────────────────────────
 
 
-async def test_embed_raises_not_implemented(llm: AzureOpenAILLM) -> None:
-    with pytest.raises(NotImplementedError, match="embeddings stay local"):
-        await llm.embed("some text")
+def test_cloud_llm_has_no_embed(llm: AzureOpenAILLM) -> None:
+    # Embeddings stay local: the cloud backend does not offer embed() at all.
+    assert not hasattr(llm, "embed")
