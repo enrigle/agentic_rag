@@ -11,11 +11,7 @@ os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
 
 logging.getLogger("streamlit.watcher.local_sources_watcher").setLevel(logging.ERROR)
 logging.getLogger("transformers").setLevel(logging.ERROR)
-import re
-import threading
 import uuid
-from typing import Any, TypedDict
-from urllib.parse import urlparse
 
 import streamlit as st
 from dotenv import load_dotenv
@@ -24,93 +20,34 @@ load_dotenv()
 
 from agentic_rag.config import load_config
 from agentic_rag.health import ServiceStatus, run_checks
-from agentic_rag.feedback.store import FeedbackEntry, get_all, save, update_category
+from agentic_rag.feedback.store import get_all, save, update_category
 from agentic_rag.feedback.judge import classify_failure
 from agentic_rag.feedback.optimizer import apply_optimization
-from agentic_rag.ingestion.notion import NotionIngester
-from agentic_rag.models import QueryResult
-from agentic_rag.observability.langfuse import score_trace
 from agentic_rag.pipeline.coordinator import PipelineCoordinator
 from agentic_rag.llm.base import ChatModel
-from agentic_rag.pipeline.rag_pipeline import (
-    create_pipeline,
-    make_embed_llm,
-    make_synth_llm,
+from agentic_rag.pipeline.rag_pipeline import create_pipeline, make_synth_llm
+from agentic_rag.ui.answers import (
+    feedback_entry,
+    score_feedback,
+    source_markdown,
+    to_result_dict,
 )
+from agentic_rag.ui.conversations import ConversationStore
+from agentic_rag.ui.ingest import BackgroundIngest
 
 
 logger = logging.getLogger(__name__)
 
-# Cap on retained conversations; oldest are evicted. thread_id comes from the URL,
-# so an unbounded store lets anyone grow process memory without limit.
-_MAX_THREADS = 100
 
-_MD_SPECIAL = re.compile(r"([\\`*_\[\]()<>#+\-!])")
-
-
-class _SyncState(TypedDict):
-    status: str
-    chunks: int
-    error: str
+# Process-wide singletons: st.cache_resource shares one instance across sessions.
+@st.cache_resource
+def get_ingest() -> BackgroundIngest:
+    return BackgroundIngest()
 
 
 @st.cache_resource
-def _get_sync_state() -> _SyncState:
-    return {"status": "idle", "chunks": 0, "error": ""}
-
-
-@st.cache_resource
-def _get_ingest_lock() -> threading.Lock:
-    """Process-wide lock so N browser sessions cannot fan out into N ingests."""
-    return threading.Lock()
-
-
-_sync_state = _get_sync_state()
-
-
-def _run_ingest() -> None:
-    """Run NotionIngester in background thread; writes result to _sync_state."""
-    _sync_state.update({"chunks": 0, "error": ""})
-    try:
-        config = load_config()
-        llm = make_embed_llm(config)
-        ingester = NotionIngester(config, llm)
-        total = asyncio.run(ingester.ingest(full=False))
-        _sync_state["chunks"] = total
-        _sync_state["status"] = "done"
-    except Exception:  # noqa: BLE001
-        # Detail goes to the server log only; the UI gets a fixed string.
-        logger.exception("ingest failed")
-        _sync_state["error"] = "see server logs"
-        _sync_state["status"] = "error"
-
-
-def _maybe_start_ingest() -> bool:
-    """Start one ingest thread process-wide. Returns True if this call started it.
-
-    _sync_state is a cached (process-wide) resource, so the lock + status check
-    stop N concurrent browser sessions from fanning out into N Notion ingests.
-    """
-    with _get_ingest_lock():
-        if _sync_state["status"] == "syncing":
-            return False
-        _sync_state["status"] = "syncing"
-    threading.Thread(target=_run_ingest, daemon=True).start()
-    return True
-
-
-def _render_source(index: int, title: str, url: str) -> None:
-    """Render one source as a link, or as inert text if the URL is not http(s).
-
-    Titles and URLs come from ingested Notion content, so both are untrusted:
-    escape markdown and reject non-http schemes (javascript:, data:).
-    """
-    safe_title = _MD_SPECIAL.sub(r"\\\1", title)
-    label = f"{index}. {safe_title}"
-    if urlparse(url).scheme in ("http", "https"):
-        st.markdown(f"[{label}](<{url}>)")
-    else:
-        st.markdown(label)
+def get_conversations() -> ConversationStore:
+    return ConversationStore(max_threads=100)
 
 
 @st.cache_resource
@@ -139,75 +76,26 @@ def get_judge_llm() -> ChatModel:
     return make_synth_llm(load_config())
 
 
-def _to_result_dict(result: QueryResult) -> dict[str, Any]:
-    """Convert QueryResult dataclass to the dict shape app.py renders."""
-    return {
-        "answer": result.answer,
-        "sources": [
-            {
-                "index": i + 1,
-                "url": s.source,
-                "title": s.title,
-                "content": s.content,
-                "score": s.score,
-            }
-            for i, s in enumerate(result.sources)
-        ],
-        "tool_calls_used": result.tool_calls_used,
-        "latency_ms": result.latency_ms,
-        "trace_id": result.trace_id,
-        "top_score": max((s.score for s in result.sources), default=0.0),
-        # Cosine of the best KB chunk; None for web answers. Feeds min_similarity tuning.
-        "top_similarity": max(
-            (s.similarity for s in result.sources if s.similarity is not None),
-            default=None,
-        ),
-    }
-
-
-def _score_feedback(result: dict[str, Any], rating: int, note: str = "") -> None:
-    """Mirror a saved thumbs rating onto the answer's Langfuse trace (no-op if untraced)."""
-    if result.get("trace_id"):
-        score_trace(
-            trace_id=result["trace_id"],
-            name="user_feedback",
-            value=1 if rating == 1 else 0,
-            comment=note or None,
-        )
-
-
-@st.cache_resource
-def _conversation_store() -> dict[str, list[Any]]:
-    return {}
-
-
-def _store_conversation(thread_id: str, messages: list[Any]) -> None:
-    """Persist a thread's messages, evicting the oldest once over _MAX_THREADS."""
-    store = _conversation_store()
-    # Re-insert so an active thread moves to the back of the eviction order.
-    store.pop(thread_id, None)
-    store[thread_id] = messages
-    while len(store) > _MAX_THREADS:
-        store.pop(next(iter(store)))
+_ingest = get_ingest()
+_conversations = get_conversations()
 
 
 # ── Background ingest (once per session) ───────────────────────────────────────
 # `streamlit run` executes this file as __main__. A plain import (tests) must not
 # start a real Notion ingest that rewrites data/chroma_db.
 if __name__ == "__main__" and not st.session_state.get("sync_started"):
-    _maybe_start_ingest()
+    _ingest.start()
     st.session_state["sync_started"] = True
 
 # ── Session defaults ───────────────────────────────────────────────────────────
 # thread_id is stored in the URL so it survives WebSocket reconnections
-_store = _conversation_store()
 if "thread_id" not in st.session_state:
     _tid = st.query_params.get("thread_id") or str(uuid.uuid4())
     st.session_state.thread_id = _tid
     st.query_params["thread_id"] = _tid
 if "messages" not in st.session_state:
     # Restore from process-level store on reconnect; otherwise start fresh
-    st.session_state.messages = list(_store.get(st.session_state.thread_id, []))
+    st.session_state.messages = _conversations.get(st.session_state.thread_id)
 if "rated" not in st.session_state:
     st.session_state.rated = False
 if "show_note" not in st.session_state:
@@ -229,20 +117,20 @@ with st.sidebar:
         new_tid = str(uuid.uuid4())
         st.session_state.thread_id = new_tid
         st.session_state.messages = []
-        _store_conversation(new_tid, [])
+        _conversations.put(new_tid, [])
         st.query_params["thread_id"] = new_tid
         st.session_state.rated = False
         st.session_state.show_note = False
         st.rerun()
 
     st.header("Knowledge Base")
-    _status = _sync_state["status"]
-    if _status == "syncing":
+    _sync = _ingest.state
+    if _sync.status == "syncing":
         st.caption("⟳ Syncing knowledge base...")
-    elif _status == "done":
-        st.caption(f"✓ Synced · {_sync_state['chunks']} chunks indexed")
-    elif _status == "error":
-        st.caption(f"✗ Sync failed ({_sync_state['error']})")
+    elif _sync.status == "done":
+        st.caption(f"✓ Synced · {_sync.chunks} chunks indexed")
+    elif _sync.status == "error":
+        st.caption(f"✗ Sync failed ({_sync.error})")
     else:
         st.caption("—")
 
@@ -287,7 +175,7 @@ for msg in st.session_state.messages:
             if r["sources"]:
                 with st.expander("Sources"):
                     for s in r["sources"]:
-                        _render_source(s["index"], s["title"], s["url"])
+                        st.markdown(source_markdown(s["index"], s["title"], s["url"]))
             st.caption(
                 f"Tool calls: {r['tool_calls_used']} · Latency: {r['latency_ms']:.0f}ms"
             )
@@ -310,23 +198,8 @@ if last_result and not st.session_state.rated:
     col1, col2 = st.columns(2)
 
     if col1.button("👍 Good answer"):
-        entry = FeedbackEntry(
-            query=last_query,
-            answer=last_result["answer"],
-            sources=[
-                {
-                    "title": s["title"],
-                    "content": s.get("content", ""),
-                    "score": s.get("score", 0.0),
-                }
-                for s in last_result["sources"]
-            ],
-            top_score=last_result.get("top_score", 0.0),
-            top_similarity=last_result.get("top_similarity"),
-            rating=1,
-        )
-        save(entry)
-        _score_feedback(last_result, 1)
+        save(feedback_entry(last_query, last_result, rating=1))
+        score_feedback(last_result, 1)
         st.session_state.rated = True
         st.rerun()
 
@@ -337,32 +210,16 @@ if last_result and not st.session_state.rated:
     if st.session_state.show_note:
         note = st.text_input("What was wrong? (optional)")
         if st.button("Submit feedback"):
-            sources_for_store = [
-                {
-                    "title": s["title"],
-                    "content": s.get("content", ""),
-                    "score": s.get("score", 0.0),
-                }
-                for s in last_result["sources"]
-            ]
-            entry = FeedbackEntry(
-                query=last_query,
-                answer=last_result["answer"],
-                sources=sources_for_store,
-                top_score=last_result.get("top_score", 0.0),
-                top_similarity=last_result.get("top_similarity"),
-                rating=-1,
-                note=note,
-            )
+            entry = feedback_entry(last_query, last_result, rating=-1, note=note)
             entry_id = save(entry)
-            _score_feedback(last_result, -1, note)
+            score_feedback(last_result, -1, note)
             with st.spinner("Analyzing failure..."):
                 category = asyncio.run(
                     classify_failure(
                         get_judge_llm(),
                         query=last_query,
                         answer=last_result["answer"],
-                        sources=sources_for_store,
+                        sources=entry.sources,
                     )
                 )
             update_category(entry_id, category)
@@ -378,7 +235,7 @@ query = st.chat_input("Ask a question")
 if query:
     st.session_state.messages.append({"role": "user", "content": query, "result": None})
     with st.spinner("Thinking..."):
-        result = _to_result_dict(
+        result = to_result_dict(
             asyncio.run(
                 get_pipeline().query(query, thread_id=st.session_state.thread_id)
             )
@@ -386,7 +243,7 @@ if query:
     st.session_state.messages.append(
         {"role": "assistant", "content": result["answer"], "result": result}
     )
-    _store_conversation(st.session_state.thread_id, st.session_state.messages)
+    _conversations.put(st.session_state.thread_id, st.session_state.messages)
     st.session_state.rated = False
     st.session_state.show_note = False
     st.rerun()
