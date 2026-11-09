@@ -79,12 +79,21 @@ class RedisConfig:
 
 
 @dataclass
+class CatalogConfig:
+    max_prompt_tokens: int = 8000
+    prefilter_top_n: int = 30
+    focus_top_k: int = 20
+    history_turns: int = 3
+
+
+@dataclass
 class RAGConfig:
     # Relative paths are resolved against the project root by load_config().
     chroma_path: Path = Path("./chroma_db")
     bm25_path: Path = Path("./bm25_index")
     feedback_db_path: Path = Path("data/feedback.db")
     feedback_config_path: Path = Path("data/feedback_config.json")  # few-shot examples
+    catalog_path: Path = Path("data/catalog.json")
     collection_name: str = "notion_kb"
     max_tool_calls: int = 5
     embed_backend: EmbedBackend = "ollama"
@@ -94,6 +103,7 @@ class RAGConfig:
     groq: GroqConfig = field(default_factory=GroqConfig)
     azure_openai: AzureOpenAIConfig = field(default_factory=AzureOpenAIConfig)
     redis: RedisConfig = field(default_factory=RedisConfig)
+    catalog: CatalogConfig = field(default_factory=CatalogConfig)
 
 
 _DC = TypeVar("_DC")
@@ -113,7 +123,13 @@ def resolve_config_path(path: Path | None = None) -> Path:
     return Path(env_path) if env_path else _DEFAULT_CONFIG_PATH
 
 
-_PATH_FIELDS = ("chroma_path", "bm25_path", "feedback_db_path", "feedback_config_path")
+_PATH_FIELDS = (
+    "chroma_path",
+    "bm25_path",
+    "feedback_db_path",
+    "feedback_config_path",
+    "catalog_path",
+)
 
 
 def _anchor(p: Path) -> Path:
@@ -128,6 +144,7 @@ def _resolve_paths(cfg: RAGConfig) -> RAGConfig:
         bm25_path=_anchor(cfg.bm25_path),
         feedback_db_path=_anchor(cfg.feedback_db_path),
         feedback_config_path=_anchor(cfg.feedback_config_path),
+        catalog_path=_anchor(cfg.catalog_path),
     )
 
 
@@ -167,6 +184,7 @@ def _load_unresolved(path: Path | None = None) -> RAGConfig:
     groq_cfg = _parse_sub(GroqConfig, raw.get("groq") or {})
     azure_openai_cfg = _parse_sub(AzureOpenAIConfig, raw.get("azure_openai") or {})
     redis_cfg = _parse_sub(RedisConfig, raw.get("redis") or {})
+    catalog_cfg = _parse_sub(CatalogConfig, raw.get("catalog") or {})
 
     top_level_keys = {
         *_PATH_FIELDS,
@@ -195,6 +213,7 @@ def _load_unresolved(path: Path | None = None) -> RAGConfig:
             groq=groq_cfg,
             azure_openai=azure_openai_cfg,
             redis=redis_cfg,
+            catalog=catalog_cfg,
         )
     except TypeError as exc:
         logger.warning(
@@ -207,4 +226,5 @@ def _load_unresolved(path: Path | None = None) -> RAGConfig:
             groq=groq_cfg,
             azure_openai=azure_openai_cfg,
             redis=redis_cfg,
+            catalog=catalog_cfg,
         )

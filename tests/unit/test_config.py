@@ -8,6 +8,7 @@ import pytest
 
 
 from agentic_rag.config import _PACKAGE_ROOT, RAGConfig, load_config
+from agentic_rag.models import QueryResult
 
 
 def test_load_config_no_path_returns_defaults() -> None:
@@ -156,3 +157,23 @@ def test_defaults_resolve_when_config_file_missing(tmp_path: Path) -> None:
     cfg = load_config(path=tmp_path / "missing.yaml")
     assert cfg.feedback_db_path == _PACKAGE_ROOT / "data" / "feedback.db"
     assert cfg.chroma_path.is_absolute()
+
+
+def test_catalog_defaults() -> None:
+    cfg = RAGConfig()
+    assert cfg.catalog.max_prompt_tokens == 8000
+    assert cfg.catalog.focus_top_k == 20
+    assert cfg.catalog.history_turns == 3
+    assert cfg.catalog_path == Path("data/catalog.json")
+
+
+def test_catalog_section_and_path_load_from_yaml(tmp_path: Path) -> None:
+    p = tmp_path / "c.yaml"
+    p.write_text("catalog_path: data/x.json\ncatalog:\n  max_prompt_tokens: 12000\n")
+    cfg = load_config(p)
+    assert cfg.catalog.max_prompt_tokens == 12000
+    assert cfg.catalog_path.is_absolute() and cfg.catalog_path.name == "x.json"
+
+
+def test_query_result_route_defaults_to_chunks() -> None:
+    assert QueryResult("a", [], 0, 0.0).route == "chunks"

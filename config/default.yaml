@@ -1,5 +1,6 @@
 chroma_path: ./chroma_db
 bm25_path: ./bm25_index
+catalog_path: data/catalog.json
 collection_name: notion_kb
 max_tool_calls: 5
 embed_backend: ollama
@@ -43,3 +44,9 @@ redis:
   url: "redis://localhost:6379"
   ttl_seconds: 3600
   similarity_threshold: 0.95
+
+catalog:
+  max_prompt_tokens: 8000
+  prefilter_top_n: 30
+  focus_top_k: 20
+  history_turns: 3
