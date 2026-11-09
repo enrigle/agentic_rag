@@ -9,10 +9,11 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal
 
+from agentic_rag.catalog.store import CardStore
 from agentic_rag.config import load_config
 from agentic_rag.ingestion.base import BaseIngester
 from agentic_rag.ingestion.notion import NotionIngester
-from agentic_rag.pipeline.rag_pipeline import make_embed_llm
+from agentic_rag.pipeline.rag_pipeline import make_embed_llm, make_synth_llm
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +28,12 @@ class IngestStatus:
 def default_ingester() -> BaseIngester:
     """NotionIngester using the configured embedding backend."""
     config = load_config()
-    return NotionIngester(config, make_embed_llm(config))
+    return NotionIngester(
+        config,
+        make_embed_llm(config),
+        make_synth_llm(config),
+        CardStore(config.catalog_path),
+    )
 
 
 class BackgroundIngest:

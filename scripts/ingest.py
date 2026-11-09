@@ -18,16 +18,22 @@ from dotenv import load_dotenv
 
 load_dotenv()  # loads .env from cwd (or any parent dir)
 
+from agentic_rag.catalog.store import CardStore
 from agentic_rag.config import load_config
 from agentic_rag.ingestion.notion import NotionIngester
-from agentic_rag.pipeline.rag_pipeline import make_embed_llm
+from agentic_rag.pipeline.rag_pipeline import make_embed_llm, make_synth_llm
 
 logger = logging.getLogger(__name__)
 
 
 async def ingest(args: argparse.Namespace) -> None:
     config = load_config()
-    ingester = NotionIngester(config, make_embed_llm(config))
+    ingester = NotionIngester(
+        config,
+        make_embed_llm(config),
+        make_synth_llm(config),
+        CardStore(config.catalog_path),
+    )
 
     if args.status:
         stats = ingester.status()
