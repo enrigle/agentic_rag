@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from typing import Any, cast
 
 import chromadb
@@ -18,13 +19,17 @@ logger = logging.getLogger(__name__)
 class ChromaVectorStore(BaseVectorStore):
     """Persistent ChromaDB vector store with async-safe blocking I/O."""
 
-    def __init__(self, config: RAGConfig) -> None:
+    def __init__(
+        self, config: RAGConfig, *, collection: chromadb.Collection | None = None
+    ) -> None:
         self._min_similarity: float = config.retriever.min_similarity
-        client = chromadb.PersistentClient(path=str(config.chroma_path))
-        self._collection = client.get_or_create_collection(
-            config.collection_name,
-            metadata={"hnsw:space": "cosine"},
-        )
+        if collection is None:
+            client = chromadb.PersistentClient(path=str(config.chroma_path))
+            collection = client.get_or_create_collection(
+                config.collection_name,
+                metadata={"hnsw:space": "cosine"},
+            )
+        self._collection = collection
 
     async def search(self, query_vec: list[float], top_k: int) -> list[SearchResult]:
         """Query the collection and filter results by min_similarity threshold.
@@ -116,3 +121,52 @@ class ChromaVectorStore(BaseVectorStore):
                 fetched["ids"], fetched["documents"], fetched["metadatas"]
             )
         ]
+
+    async def fetch_by_page_ids(
+        self, page_ids: list[str], limit: int
+    ) -> list[SearchResult]:
+        """Fetch all chunks of the given pages, in page_ids order then chunk order.
+
+        Args:
+            page_ids: Notion page ids (metadata ``page_id``).
+            limit: Maximum number of chunks to return.
+
+        Returns:
+            SearchResult list with score=1.0 and similarity=None.
+        """
+        if not page_ids:
+            return []
+
+        loop = asyncio.get_running_loop()
+        fetched: dict[str, Any] = cast(
+            dict[str, Any],
+            await loop.run_in_executor(
+                None,
+                lambda: self._collection.get(
+                    where={"page_id": {"$in": page_ids}},  # type: ignore[dict-item]
+                    include=["documents", "metadatas"],
+                ),
+            ),
+        )
+
+        page_rank = {pid: i for i, pid in enumerate(page_ids)}
+        rows = sorted(
+            zip(fetched["ids"], fetched["documents"], fetched["metadatas"]),
+            key=lambda r: (page_rank[r[2]["page_id"]], _chunk_index(r[0])),
+        )
+        return [
+            SearchResult(
+                id=fid,
+                title=meta.get("title", ""),
+                source=meta.get("source", ""),
+                content=doc,
+                score=1.0,
+            )
+            for fid, doc, meta in rows[:limit]
+        ]
+
+
+def _chunk_index(chunk_id: str) -> float:
+    """Parse the ``_chunk_<i>`` suffix; unparseable ids sort last."""
+    m = re.search(r"_chunk_(\d+)$", chunk_id)
+    return int(m.group(1)) if m else float("inf")
