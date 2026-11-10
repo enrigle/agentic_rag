@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 
+from agentic_rag.catalog.store import CardStore
 from agentic_rag.cache.semantic_cache import SemanticCache
 from agentic_rag.config import RAGConfig, load_config
 from agentic_rag.llm.base import ChatModel, Embedder
@@ -12,6 +13,7 @@ from agentic_rag.llm.openai_compat import AzureOpenAILLM, GroqLLM
 from agentic_rag.llm.sentence_transformers_llm import SentenceTransformersLLM
 from agentic_rag.pipeline.coordinator import PipelineCoordinator
 from agentic_rag.pipeline.memory import ConversationMemory
+from agentic_rag.pipeline.router import QueryRouter
 from agentic_rag.pipeline.sources import RAGSource, WebSource
 from agentic_rag.pipeline.synthesizer import Synthesizer
 from agentic_rag.retrieval.bm25 import BM25Retriever
@@ -64,7 +66,8 @@ def create_pipeline(config: RAGConfig | None = None) -> PipelineCoordinator:
         config = load_config()
 
     llm = make_embed_llm(config)
-    hybrid = HybridRetriever(ChromaVectorStore(config), BM25Retriever(config), config)
+    vector_store = ChromaVectorStore(config)
+    hybrid = HybridRetriever(vector_store, BM25Retriever(config), config)
 
     synth_llm = make_synth_llm(config)
 
@@ -82,4 +85,8 @@ def create_pipeline(config: RAGConfig | None = None) -> PipelineCoordinator:
         max_tool_calls=config.max_tool_calls,
         cache=cache,
         embed_llm=llm,
+        router=QueryRouter(synth_llm, config.catalog.history_turns),
+        card_store=CardStore(config.catalog_path),
+        page_fetcher=vector_store,
+        catalog_config=config.catalog,
     )
