@@ -10,7 +10,8 @@ from agentic_rag.models import ChatMessage, SearchResult
 
 INCOMPLETE_NOTE = "Found {n} pages; this list may be incomplete."
 
-_CITATION = re.compile(r"\[(\d+)\]")
+_CITATION = re.compile(r"\[(\d+(?:\s*[,\u2013-]\s*\d+)*)\]")
+_RANGE_SPLIT = re.compile(r"\s*([,\u2013-])\s*")
 
 _RULES = """\
 You answer questions about the user's Notion pages using ONLY the numbered cards below. Do not invent pages.
@@ -88,12 +89,31 @@ def build_catalog_prompt(
     return "\n\n".join(parts)
 
 
+def _expand_group(group: str) -> list[int]:
+    """Expand "1, 2" / "3-5" / "3\u20135" into card numbers."""
+    nums: list[int] = []
+    parts = _RANGE_SPLIT.split(group)  # numbers at even indexes, separators at odd
+    prev: int | None = None
+    sep = ","
+    for i, part in enumerate(parts):
+        if i % 2:
+            sep = part
+            continue
+        n = int(part)
+        if sep != "," and prev is not None:
+            nums.extend(range(prev + 1, n + 1))
+        else:
+            nums.append(n)
+        prev = n
+    return nums
+
+
 def extract_citations(answer: str, n_cards: int) -> list[int]:
     seen: list[int] = []
     for m in _CITATION.finditer(answer):
-        n = int(m.group(1))
-        if 1 <= n <= n_cards and n not in seen:
-            seen.append(n)
+        for n in _expand_group(m.group(1)):
+            if 1 <= n <= n_cards and n not in seen:
+                seen.append(n)
     return seen
 
 

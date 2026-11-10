@@ -70,6 +70,14 @@ def test_extract_citations_ignores_out_of_range() -> None:
     assert extract_citations("no cites", n_cards=3) == []
 
 
+def test_extract_citations_groups_and_ranges() -> None:
+    assert extract_citations("Foo [1, 2], Bar [3-4]", 4) == [1, 2, 3, 4]
+    assert extract_citations("A [1,2]", 4) == [1, 2]
+    assert extract_citations("A [3\u20134]", 4) == [3, 4]
+    assert extract_citations("A [4] [1][2] [2, 3]", 4) == [4, 1, 2, 3]
+    assert extract_citations("A [1, 9] [3-6]", 4) == [1, 3, 4]
+
+
 def test_cards_to_sources_maps_fields() -> None:
     cards = [_card("1"), _card("2")]
     assert cards_to_sources(cards, [2]) == [
