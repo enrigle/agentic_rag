@@ -119,5 +119,5 @@ def test_build_card_prompt_truncates_page_text() -> None:
 async def test_items_beyond_truncation_still_accepted() -> None:
     page = "x" * 200 + " Skill Z"
     chat = FlakyChat(0, '{"summary": "ok", "items": ["Skill Z"]}')
-    fields = await generate_card_fields(chat, "T", page, max_page_chars=100)  # type: ignore[arg-type]
+    fields = await generate_card_fields(chat, "T", page, max_page_chars=100)
     assert fields.items == ["Skill Z"]
