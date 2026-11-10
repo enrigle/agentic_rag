@@ -130,6 +130,7 @@ with st.sidebar:
         st.rerun()
 
     st.header("Knowledge Base")
+    st.checkbox("Also search the web", value=False, key="use_web")
     _sync = _ingest.state
     if _sync.status == "syncing":
         st.caption("⟳ Syncing knowledge base...")
@@ -244,7 +245,11 @@ if query:
     with st.spinner("Thinking..."):
         result = to_result_dict(
             asyncio.run(
-                get_pipeline().query(query, thread_id=st.session_state.thread_id)
+                get_pipeline().query(
+                    query,
+                    thread_id=st.session_state.thread_id,
+                    use_web=st.session_state.get("use_web", False),
+                )
             )
         )
     st.session_state.messages.append(
