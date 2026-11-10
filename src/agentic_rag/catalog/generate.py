@@ -74,12 +74,15 @@ async def generate_card_fields(
     retries: int = 3,
     max_page_chars: int = DEFAULT_MAX_PAGE_CHARS,
 ) -> CardFields:
-    """Retry RuntimeError from the backend with backoff. ValueError is not retried."""
+    """Retry backend errors (RuntimeError, or ValueError from an empty reply) with backoff.
+
+    A ValueError from parse_card_reply is not retried.
+    """
     prompt = build_card_prompt(title, page_text, max_page_chars)
     for attempt in range(retries):
         try:
-            reply = await llm.chat(prompt)
-        except RuntimeError as exc:
+            reply = await llm.chat(prompt, json_output=True)
+        except (RuntimeError, ValueError) as exc:
             if attempt == retries - 1:
                 raise
             logger.warning("card generation failed (attempt %d): %s", attempt + 1, exc)

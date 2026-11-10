@@ -22,3 +22,19 @@ def test_cloud_llms_only_chat() -> None:
     for cls in (GroqLLM, AzureOpenAILLM):
         assert issubclass(cls, ChatModel)
         assert not issubclass(cls, Embedder)  # embeddings stay local
+
+
+async def test_ollama_chat_passes_format_json_only_when_requested() -> None:
+    from unittest.mock import AsyncMock, MagicMock
+
+    from agentic_rag.config import LLMConfig
+
+    llm = OllamaLLM(LLMConfig())
+    chat = AsyncMock(return_value=MagicMock(message=MagicMock(content="{}")))
+    llm._client.chat = chat  # type: ignore[method-assign]
+
+    await llm.chat("p", json_output=True)
+    await llm.chat("p")
+
+    assert chat.await_args_list[0].kwargs["format"] == "json"
+    assert "format" not in chat.await_args_list[1].kwargs

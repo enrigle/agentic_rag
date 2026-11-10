@@ -356,7 +356,9 @@ class NotionIngester(BaseIngester):
         if raw_tags != tags_before and not self._cards_stopped:
             tags = sorted(raw_tags)
             try:
-                reply = await self._chat_llm.chat(build_tag_merge_prompt(tags))
+                reply = await self._chat_llm.chat(
+                    build_tag_merge_prompt(tags), json_output=True
+                )
                 tag_map = parse_tag_map(reply, tags)
             except (RuntimeError, ValueError) as exc:
                 logger.warning("Tag merge failed, keeping unmerged tags: %s", exc)

@@ -190,6 +190,7 @@ async def test_tags_merged_when_raw_tags_changed(tmp_path: Path) -> None:
     card = store.get("p1")
     assert card is not None and card.tags == ["animals"]
     assert chat.chat.await_count == 2
+    assert chat.chat.await_args_list[1].kwargs == {"json_output": True}
 
 
 async def test_merge_failure_keeps_unmerged_tags(tmp_path: Path) -> None:

@@ -19,15 +19,23 @@ def _card(page_id: str, tags: list[str]) -> PageCard:
 
 
 class FlakyChat:
-    def __init__(self, failures: int, reply: str = '{"summary": "ok"}') -> None:
+    def __init__(
+        self,
+        failures: int,
+        reply: str = '{"summary": "ok"}',
+        error: Exception | None = None,
+    ) -> None:
         self.failures = failures
         self.reply = reply
+        self.error = error or RuntimeError("backend down")
         self.calls = 0
+        self.json_flags: list[bool] = []
 
-    async def chat(self, prompt: str) -> str:
+    async def chat(self, prompt: str, *, json_output: bool = False) -> str:
         self.calls += 1
+        self.json_flags.append(json_output)
         if self.calls <= self.failures:
-            raise RuntimeError("backend down")
+            raise self.error
         return self.reply
 
 
@@ -121,3 +129,25 @@ async def test_items_beyond_truncation_still_accepted() -> None:
     chat = FlakyChat(0, '{"summary": "ok", "items": ["Skill Z"]}')
     fields = await generate_card_fields(chat, "T", page, max_page_chars=100)
     assert fields.items == ["Skill Z"]
+
+
+async def test_generate_requests_json_output() -> None:
+    chat = FlakyChat(0)
+    await generate_card_fields(chat, "T", "page")
+    assert chat.json_flags == [True]
+
+
+async def test_empty_reply_value_error_is_retried(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("agentic_rag.catalog.generate.asyncio.sleep", AsyncMock())
+    chat = FlakyChat(1, error=ValueError("empty content"))
+    fields = await generate_card_fields(chat, "T", "page")
+    assert chat.calls == 2 and fields.summary == "ok"
+
+
+async def test_parse_value_error_is_not_retried() -> None:
+    chat = FlakyChat(0, reply="not json")
+    with pytest.raises(ValueError):
+        await generate_card_fields(chat, "T", "page")
+    assert chat.calls == 1

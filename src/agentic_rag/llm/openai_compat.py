@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+from typing import Any
 
 import openai
 
@@ -28,7 +29,7 @@ class OpenAICompatLLM:
         self._provider = provider
         logger.debug("%s initialised: model=%s", provider, model)
 
-    async def chat(self, prompt: str) -> str:
+    async def chat(self, prompt: str, *, json_output: bool = False) -> str:
         if not prompt:
             raise ValueError("prompt must be a non-empty string")
         logger.debug(
@@ -37,10 +38,14 @@ class OpenAICompatLLM:
             self._model,
             len(prompt),
         )
+        extra: dict[str, Any] = (
+            {"response_format": {"type": "json_object"}} if json_output else {}
+        )
         try:
             response = await self._client.chat.completions.create(
                 model=self._model,
                 messages=[{"role": "user", "content": prompt}],
+                **extra,
             )
         except openai.APIError as exc:
             raise RuntimeError(f"{self._provider} chat failed: {exc}") from exc
@@ -48,7 +53,7 @@ class OpenAICompatLLM:
             raise ValueError(
                 f"{self._provider} returned no choices for model={self._model!r}"
             )
-        content = response.choices[0].message.content
+        content: str | None = response.choices[0].message.content
         if not content:
             raise ValueError(
                 f"{self._provider} returned empty content for model={self._model!r}"

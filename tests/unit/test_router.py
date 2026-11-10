@@ -15,9 +15,11 @@ class StubLLM:
     def __init__(self, reply: str | Exception) -> None:
         self.reply = reply
         self.prompts: list[str] = []
+        self.json_flags: list[bool] = []
 
-    async def chat(self, prompt: str) -> str:
+    async def chat(self, prompt: str, *, json_output: bool = False) -> str:
         self.prompts.append(prompt)
+        self.json_flags.append(json_output)
         if isinstance(self.reply, Exception):
             raise self.reply
         return self.reply
@@ -121,3 +123,11 @@ async def test_router_with_history_uses_rewrite() -> None:
         "it?", [ChatMessage("user", "x")], [("1", "T")]
     )
     assert d == RouteDecision("rewritten", "chunks", True)
+
+
+async def test_route_requests_json_output() -> None:
+    llm = StubLLM(
+        '{"standalone_query": "a", "route": "chunks", "focus_previous": false}'
+    )
+    await QueryRouter(llm, 3).route("q", [], [])
+    assert llm.json_flags == [True]

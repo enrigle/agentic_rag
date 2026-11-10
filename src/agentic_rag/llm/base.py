@@ -20,6 +20,9 @@ class ChatModel(Protocol):
 
     Implementations raise ValueError on an empty reply and RuntimeError on
     backend or network failure.
+
+    When json_output is True, the backend requests a JSON-object reply if it
+    supports that. Callers still parse and validate the reply.
     """
 
-    async def chat(self, prompt: str) -> str: ...
+    async def chat(self, prompt: str, *, json_output: bool = False) -> str: ...

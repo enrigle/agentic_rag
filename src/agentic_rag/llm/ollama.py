@@ -1,6 +1,7 @@
 """Ollama-backed LLM implementation."""
 
 import logging
+from typing import Any
 
 import ollama
 
@@ -26,21 +27,23 @@ class OllamaLLM:
             config.base_url,
         )
 
-    async def chat(self, prompt: str) -> str:
+    async def chat(self, prompt: str, *, json_output: bool = False) -> str:
         """Send a user prompt to the chat model and return the reply text."""
         if not prompt:
             raise ValueError("prompt must be a non-empty string")
         logger.debug("chat() → model=%s prompt_len=%d", self._config.model, len(prompt))
+        extra: dict[str, Any] = {"format": "json"} if json_output else {}
         try:
             response = await self._client.chat(
                 model=self._config.model,
                 messages=[{"role": "user", "content": prompt}],
+                **extra,
             )
         except ollama.ResponseError as exc:
             raise RuntimeError(
                 f"Ollama chat failed (model={self._config.model!r}): {exc}"
             ) from exc
-        content = response.message.content
+        content: str | None = response.message.content
         if not content:
             raise ValueError(
                 f"Ollama returned empty content for model={self._config.model!r}"
