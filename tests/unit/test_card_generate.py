@@ -109,3 +109,15 @@ def test_apply_tag_map_dedupes() -> None:
     out = apply_tag_map(cards, {"claude-code": "claude", "anthropic": "claude"})
     assert out[0].tags == ["claude"] and out[1].tags == ["x"]
     assert cards[0].tags == ["claude-code", "anthropic"]
+
+
+def test_build_card_prompt_truncates_page_text() -> None:
+    prompt = build_card_prompt("T", "a" * 100 + "TAIL", max_page_chars=100)
+    assert "a" * 100 in prompt and "TAIL" not in prompt
+
+
+async def test_items_beyond_truncation_still_accepted() -> None:
+    page = "x" * 200 + " Skill Z"
+    chat = FlakyChat(0, '{"summary": "ok", "items": ["Skill Z"]}')
+    fields = await generate_card_fields(chat, "T", page, max_page_chars=100)  # type: ignore[arg-type]
+    assert fields.items == ["Skill Z"]

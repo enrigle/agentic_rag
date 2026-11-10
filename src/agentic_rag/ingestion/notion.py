@@ -296,7 +296,10 @@ class NotionIngester(BaseIngester):
         assert self._chat_llm is not None and self._card_store is not None
         try:
             fields = await generate_card_fields(
-                self._chat_llm, title, "\n".join(b.text for b in blocks)
+                self._chat_llm,
+                title,
+                "\n".join(b.text for b in blocks),
+                max_page_chars=self._config.catalog.max_page_chars,
             )
             embedding = await self._llm.embed(f"{title}\n{fields.summary}")
         except (RuntimeError, ValueError) as exc:

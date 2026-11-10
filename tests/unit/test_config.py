@@ -164,6 +164,7 @@ def test_catalog_defaults() -> None:
     assert cfg.catalog.max_prompt_tokens == 8000
     assert cfg.catalog.focus_top_k == 20
     assert cfg.catalog.history_turns == 3
+    assert cfg.catalog.max_page_chars == 24000
     assert cfg.catalog_path == Path("data/catalog.json")
 
 

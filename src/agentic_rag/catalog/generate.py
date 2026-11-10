@@ -25,13 +25,13 @@ class CardFields:
     items_truncated: bool
 
 
-def build_card_prompt(title: str, page_text: str) -> str:
+def build_card_prompt(title: str, page_text: str, max_page_chars: int = 24000) -> str:
     return (
         "Describe this Notion page for a catalog. Reply with JSON only, no other text:\n"
         '{"summary": "2-3 sentences", "tags": ["short lowercase topic", ...], "items": [...]}\n'
         "items = named things the page lists (skills, tools, repos, commands), "
         "copied exactly as written. Use [] if the page lists none.\n\n"
-        f"Title: {title}\n\nPage text:\n{page_text}"
+        f"Title: {title}\n\nPage text:\n{page_text[:max_page_chars]}"
     )
 
 
@@ -65,10 +65,14 @@ def parse_card_reply(text: str, page_text: str) -> CardFields:
 
 
 async def generate_card_fields(
-    llm: ChatModel, title: str, page_text: str, retries: int = 3
+    llm: ChatModel,
+    title: str,
+    page_text: str,
+    retries: int = 3,
+    max_page_chars: int = 24000,
 ) -> CardFields:
     """Retry RuntimeError from the backend with backoff. ValueError is not retried."""
-    prompt = build_card_prompt(title, page_text)
+    prompt = build_card_prompt(title, page_text, max_page_chars)
     for attempt in range(retries):
         try:
             reply = await llm.chat(prompt)

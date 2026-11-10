@@ -84,6 +84,7 @@ class CatalogConfig:
     prefilter_top_n: int = 30
     focus_top_k: int = 20
     history_turns: int = 3
+    max_page_chars: int = 24000
 
 
 @dataclass
