@@ -138,7 +138,7 @@ class Evaluator:
 
     def _get_pipeline(self) -> PipelineCoordinator:
         if self._pipeline is None:
-            self._pipeline = create_pipeline(self._config)
+            self._pipeline = create_pipeline(self._config, use_cache=False)
         return self._pipeline
 
     async def run(self) -> None:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 import re
 import time
@@ -105,7 +106,8 @@ class PipelineCoordinator:
             if cached is not None:
                 logger.debug("cache hit for query len=%d", len(user_query))
                 self._memory.append(thread_id, user_query, cached.answer)
-                return cached
+                self._remember_pages(thread_id, cached.sources)
+                return dataclasses.replace(cached, route=decision.route)
 
         t0 = time.monotonic()
         ctx = PipelineContext(
@@ -151,11 +153,7 @@ class PipelineCoordinator:
 
         self._memory.append(thread_id, user_query, ctx.final_answer or "")
         if ctx.error is None:
-            titles = {s.id: s.title for s in sources}
-            self._last_pages[thread_id] = [
-                (pid, titles.get(pid) or titles.get(f"{pid}_chunk_0", ""))
-                for pid in page_ids_from_sources(sources)
-            ]
+            self._remember_pages(thread_id, sources)
         latency_ms = round((time.monotonic() - t0) * 1000, 2)
 
         result = QueryResult(
@@ -172,6 +170,13 @@ class PipelineCoordinator:
             await cache.set(user_query, result, query_vec)
 
         return result
+
+    def _remember_pages(self, thread_id: str, sources: list[SearchResult]) -> None:
+        titles = {s.id: s.title for s in sources}
+        self._last_pages[thread_id] = [
+            (pid, titles.get(pid) or titles.get(f"{pid}_chunk_0", ""))
+            for pid in page_ids_from_sources(sources)
+        ]
 
     def _select_cards(self, ctx: PipelineContext) -> list[PageCard]:
         if self._card_store is None:
@@ -241,7 +246,14 @@ class PipelineCoordinator:
     ) -> tuple[str, list[SearchResult]]:
         cards = self._select_cards(ctx)
         if not cards:
-            return NO_INFO, []
+            # No catalog yet: answer from chunks, never web on this route.
+            return await self._run_chunks(
+                user_query,
+                dataclasses.replace(decision, focus_previous=False),
+                ctx,
+                [],
+                False,
+            )
         answer = await self._synthesizer.synthesize_catalog(
             user_query, ctx.chat_history, cards, []
         )

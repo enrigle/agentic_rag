@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 from agentic_rag.catalog.store import CardStore, PageCard
 from agentic_rag.config import CatalogConfig
-from agentic_rag.models import SearchResult
+from agentic_rag.models import QueryResult, SearchResult
 from agentic_rag.pipeline.coordinator import PipelineCoordinator, page_ids_from_sources
 from agentic_rag.pipeline.memory import ConversationMemory
 from agentic_rag.pipeline.router import RouteDecision
@@ -107,10 +107,46 @@ async def test_catalog_route_returns_cited_cards_and_note(tmp_path: Path) -> Non
 
 
 async def test_catalog_route_without_catalog_file(tmp_path: Path) -> None:
-    coord, _, _, _ = _build(tmp_path, [_d("catalog")])
+    rag = _source("rag", [_sr("p1_chunk_0")])
+    coord, _, _, _ = _build(tmp_path, [_d("catalog", "the standalone")], [rag])
     r = await coord.query("list")
+    assert r.answer == "answer [1]"
+    assert rag.search.call_args.args[0] == "the standalone"
+    assert r.route == "catalog"
+
+
+async def test_catalog_fallback_never_uses_web(tmp_path: Path) -> None:
+    rag = _source("rag", [])
+    web = _source("web", [_sr("w")])
+    coord, _, _, _ = _build(tmp_path, [_d("catalog")], [rag, web])
+    r = await coord.query("list", use_web=True)
+    web.search.assert_not_called()
     assert r.answer == NO_INFO
     assert r.route == "catalog"
+
+
+async def test_cache_hit_keeps_route_and_sets_last_pages(tmp_path: Path) -> None:
+    cached = QueryResult(
+        answer="cached",
+        sources=[_sr("p1_chunk_0", "Page One")],
+        tool_calls_used=0,
+        latency_ms=1.0,
+        route="chunks",
+    )
+    cache = MagicMock()
+    cache.get = AsyncMock(return_value=cached)
+    cache.set = AsyncMock()
+    coord, _, fetcher, _ = _build(
+        tmp_path,
+        [_d("catalog"), _d("chunks", focus=True)],
+        cache=cache,
+    )
+    r = await coord.query("list")
+    assert r.route == "catalog"
+    assert r.answer == "cached"
+    cache.get = AsyncMock(return_value=None)
+    await coord.query("summarize it")
+    fetcher.fetch_by_page_ids.assert_awaited_once_with(["p1"], 20)
 
 
 async def test_catalog_route_never_calls_web_even_if_use_web(tmp_path: Path) -> None:

@@ -164,3 +164,10 @@ async def test_run_auto_returns_1_when_no_items(tmp_path: Path) -> None:
     queries.write_text("[]")
     with patch.object(ev, "QUERIES_FILE", queries):
         assert await ev.Evaluator().run_auto() == 1
+
+
+def test_get_pipeline_builds_without_semantic_cache() -> None:
+    with patch.object(ev, "create_pipeline") as create:
+        evaluator = ev.Evaluator()
+        evaluator._get_pipeline()
+    assert create.call_args.kwargs["use_cache"] is False

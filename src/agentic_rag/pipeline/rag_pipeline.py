@@ -54,13 +54,16 @@ def make_synth_llm(config: RAGConfig) -> ChatModel:
     return OllamaLLM(config.llm)
 
 
-def create_pipeline(config: RAGConfig | None = None) -> PipelineCoordinator:
+def create_pipeline(
+    config: RAGConfig | None = None, use_cache: bool = True
+) -> PipelineCoordinator:
     """Wire PipelineCoordinator from config.
 
     - Embeddings use make_embed_llm (embed_backend: Ollama or sentence-transformers).
     - Synthesis uses GroqLLM when GROQ_API_KEY is set, then AzureOpenAILLM when
       azure_openai.endpoint is set, otherwise falls back to OllamaLLM.
-    - SemanticCache is always attached; it fails open if Redis is unreachable.
+    - SemanticCache is attached unless use_cache is False (e.g. the eval); it
+      fails open if Redis is unreachable.
     """
     if config is None:
         config = load_config()
@@ -71,7 +74,7 @@ def create_pipeline(config: RAGConfig | None = None) -> PipelineCoordinator:
 
     synth_llm = make_synth_llm(config)
 
-    cache = SemanticCache(config.redis, llm)
+    cache = SemanticCache(config.redis, llm) if use_cache else None
 
     return PipelineCoordinator(
         sources=[RAGSource(llm, hybrid), WebSource()],
