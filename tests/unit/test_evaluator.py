@@ -156,3 +156,11 @@ async def test_run_auto_returns_0_when_all_pass(tmp_path: Path) -> None:
         evaluator = ev.Evaluator()
         evaluator._pipeline = pipeline
         assert await evaluator.run_auto() == 0
+
+
+@pytest.mark.asyncio
+async def test_run_auto_returns_1_when_no_items(tmp_path: Path) -> None:
+    queries = tmp_path / "queries.json"
+    queries.write_text("[]")
+    with patch.object(ev, "QUERIES_FILE", queries):
+        assert await ev.Evaluator().run_auto() == 1

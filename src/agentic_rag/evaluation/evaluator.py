@@ -27,12 +27,17 @@ QUERIES_FILE = EVALS_DIR / "queries.json"
 RESULTS_FILE = EVALS_DIR / "results.jsonl"
 
 
-def _load_queries() -> list[dict[str, Any]]:
+def _read_queries() -> list[dict[str, Any]]:
     if not QUERIES_FILE.exists():
         logger.error("Queries file not found: %s", QUERIES_FILE)
         sys.exit(1)
     with QUERIES_FILE.open() as f:
         queries: list[dict[str, Any]] = json.load(f)
+    return queries
+
+
+def _load_queries() -> list[dict[str, Any]]:
+    queries = _read_queries()
     if not queries:
         print("No queries found in queries.json.")
         sys.exit(0)
@@ -206,7 +211,10 @@ class Evaluator:
     async def run_auto(self) -> int:
         """Run every item against its checks. Return 0 if all pass, else 1."""
         failed = 0
-        raw_items = _load_queries()
+        raw_items = _read_queries()
+        if not raw_items:
+            print("FAIL no eval items in queries.json")
+            return 1
         for index, raw in enumerate(raw_items):
             try:
                 item = eval_item_from_dict(raw)
