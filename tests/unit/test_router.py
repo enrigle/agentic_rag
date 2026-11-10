@@ -95,6 +95,16 @@ async def test_router_llm_error_falls_back_to_both(
     assert "LLM error" in caplog.text
 
 
+async def test_router_connection_error_falls_back_to_both(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    router = QueryRouter(StubLLM(ConnectionError("ollama down")), 3)
+    with caplog.at_level(logging.WARNING):
+        d = await router.route("q", [], [])
+    assert d == RouteDecision("q", "both", False)
+    assert "LLM error" in caplog.text
+
+
 async def test_router_without_history_keeps_original_query() -> None:
     reply = (
         '{"standalone_query": "rewritten", "route": "catalog", "focus_previous": false}'

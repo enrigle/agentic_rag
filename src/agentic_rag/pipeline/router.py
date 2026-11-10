@@ -95,7 +95,7 @@ class QueryRouter:
         )
         try:
             reply = await self._llm.chat(prompt)
-        except (RuntimeError, ValueError) as exc:
+        except (RuntimeError, ValueError, OSError) as exc:
             return _fallback(query, f"LLM error ({exc})")
         decision = parse_route(reply, query)
         if not history:
