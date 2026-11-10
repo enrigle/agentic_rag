@@ -7,11 +7,13 @@ import logging
 import sys
 import uuid
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from agentic_rag.config import RAGConfig
+from agentic_rag.models import ChatMessage, QueryResult
 from agentic_rag.observability.langfuse import score_trace
 from agentic_rag.pipeline.coordinator import PipelineCoordinator
 from agentic_rag.pipeline.rag_pipeline import create_pipeline
@@ -35,6 +37,73 @@ def _load_queries() -> list[dict[str, Any]]:
         print("No queries found in queries.json.")
         sys.exit(0)
     return queries
+
+
+@dataclass
+class EvalItem:
+    id: str
+    query: str
+    history: list[ChatMessage]
+    expected_route: str | None
+    expected_pages: list[str]
+    forbidden_pages: list[str]
+    expected_answer_start: str | None
+    expected_keywords: list[str]
+
+
+def _parse_history(raw: Any) -> list[ChatMessage]:
+    if not isinstance(raw, list):
+        raise ValueError("history must be a list")
+    messages: list[ChatMessage] = []
+    for m in raw:
+        if not isinstance(m, dict):
+            raise ValueError("history entries must be objects")
+        role, content = m.get("role"), m.get("content")
+        if role not in ("user", "assistant") or not isinstance(content, str):
+            raise ValueError(f"bad history entry: {m!r}")
+        messages.append(ChatMessage(role, content))
+    return messages
+
+
+def eval_item_from_dict(raw: dict[str, Any]) -> EvalItem:
+    """Validate one queries.json entry at the boundary."""
+    item_id, query = raw.get("id"), raw.get("query")
+    if not isinstance(item_id, str) or not item_id:
+        raise ValueError("eval item needs a non-empty string 'id'")
+    if not isinstance(query, str) or not query:
+        raise ValueError(f"eval item {item_id!r} needs a non-empty string 'query'")
+    return EvalItem(
+        id=item_id,
+        query=query,
+        history=_parse_history(raw.get("history", [])),
+        expected_route=raw.get("expected_route"),
+        expected_pages=list(raw.get("expected_pages", [])),
+        forbidden_pages=list(raw.get("forbidden_pages", [])),
+        expected_answer_start=raw.get("expected_answer_start"),
+        expected_keywords=list(raw.get("expected_keywords", [])),
+    )
+
+
+def check_item(item: EvalItem, result: QueryResult) -> list[str]:
+    """Return failure messages for one result; an empty list means pass."""
+    failures: list[str] = []
+    titles = [s.title for s in result.sources]
+    answer = result.answer.strip().lower()
+    if item.expected_route is not None and result.route != item.expected_route:
+        failures.append(f"route {result.route!r} != {item.expected_route!r}")
+    failures += [f"missing page {t!r}" for t in item.expected_pages if t not in titles]
+    failures += [
+        f"forbidden page {t!r} cited" for t in item.forbidden_pages if t in titles
+    ]
+    start = item.expected_answer_start
+    if start is not None and not answer.startswith(start.lower()):
+        failures.append(f"answer does not start with {start!r}")
+    failures += [
+        f"missing keyword {k!r}"
+        for k in item.expected_keywords
+        if k.lower() not in answer
+    ]
+    return failures
 
 
 def _append_result(record: dict[str, Any]) -> None:
@@ -133,6 +202,33 @@ class Evaluator:
             print(f"Saved {'✓' if rating_input == 'y' else '✗'}\n")
 
         print("Done.")
+
+    async def run_auto(self) -> int:
+        """Run every item against its checks. Return 0 if all pass, else 1."""
+        failed = 0
+        raw_items = _load_queries()
+        for index, raw in enumerate(raw_items):
+            try:
+                item = eval_item_from_dict(raw)
+            except ValueError as exc:
+                print(f"FAIL #{index} — invalid item: {exc}")
+                failed += 1
+                continue
+            pipeline = self._get_pipeline()
+            thread_id = f"eval-{item.id}-{uuid.uuid4().hex[:8]}"
+            if item.history:
+                pipeline.seed_history(thread_id, item.history)
+            result = await pipeline.query(
+                item.query, thread_id=thread_id, use_web=False
+            )
+            failures = check_item(item, result)
+            if failures:
+                failed += 1
+                print(f"FAIL {item.id} — {'; '.join(failures)}")
+            else:
+                print(f"PASS {item.id}")
+        print(f"{len(raw_items) - failed}/{len(raw_items)} passed")
+        return 1 if failed else 0
 
     def report(self) -> None:
         """Print a summary table from saved results.jsonl."""
