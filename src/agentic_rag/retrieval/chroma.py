@@ -16,6 +16,24 @@ from agentic_rag.retrieval.base import BaseVectorStore
 logger = logging.getLogger(__name__)
 
 
+def _pick_with_quota(row_pages: list[str], n_pages: int, limit: int) -> set[int]:
+    """Indexes to keep from rows sorted by page then chunk: per-page quota, then fill."""
+    quota = max(1, limit // n_pages)
+    per_page: dict[str, int] = {}
+    keep: set[int] = set()
+    for i, pid in enumerate(row_pages):
+        if len(keep) >= limit:
+            break
+        if per_page.get(pid, 0) < quota:
+            per_page[pid] = per_page.get(pid, 0) + 1
+            keep.add(i)
+    for i in range(len(row_pages)):
+        if len(keep) >= limit:
+            break
+        keep.add(i)
+    return keep
+
+
 class ChromaVectorStore(BaseVectorStore):
     """Persistent ChromaDB vector store with async-safe blocking I/O."""
 
@@ -154,6 +172,7 @@ class ChromaVectorStore(BaseVectorStore):
             zip(fetched["ids"], fetched["documents"], fetched["metadatas"]),
             key=lambda r: (page_rank[r[2]["page_id"]], _chunk_index(r[0])),
         )
+        keep = _pick_with_quota([r[2]["page_id"] for r in rows], len(page_ids), limit)
         return [
             SearchResult(
                 id=fid,
@@ -162,7 +181,8 @@ class ChromaVectorStore(BaseVectorStore):
                 content=doc,
                 score=1.0,
             )
-            for fid, doc, meta in rows[:limit]
+            for i, (fid, doc, meta) in enumerate(rows)
+            if i in keep
         ]
 
 
