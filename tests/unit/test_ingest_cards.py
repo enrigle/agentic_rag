@@ -8,7 +8,9 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from agentic_rag.catalog.generate import CardFields
 from agentic_rag.catalog.store import CardStore, PageCard
+from agentic_rag.config import CatalogConfig
 from agentic_rag.ingestion.chunker import TextBlock
 from agentic_rag.ingestion.notion import INDEX_DOC_FORMAT, NotionIngester
 
@@ -41,6 +43,9 @@ def _make(
             MagicMock(), AsyncMock(embed=AsyncMock(return_value=[0.5])), chat, store
         )
     ing._config.ingestion.vision_model = ""
+    ing._config.ingestion.chunk_size = 1000
+    ing._config.ingestion.chunk_overlap = 100
+    ing._config.catalog = CatalogConfig()
     ing._collection = MagicMock()
     ing._rebuild_bm25 = MagicMock()  # type: ignore[method-assign]
     return ing
@@ -85,6 +90,7 @@ async def _run(
     pages: list[dict[str, Any]],
     blocks: list[TextBlock],
     child_ids: list[str] | None = None,
+    sleep: AsyncMock | None = None,
 ) -> AsyncMock:
     fetch = AsyncMock(side_effect=_fake_fetch(blocks, child_ids or []))
     with (
@@ -96,6 +102,7 @@ async def _run(
         ),
         patch.object(NotionIngester, "_fetch_text_from_blocks", fetch),
         patch("agentic_rag.catalog.generate.asyncio.sleep", AsyncMock()),
+        patch("agentic_rag.ingestion.notion.asyncio.sleep", sleep or AsyncMock()),
     ):
         await ing.ingest()
     return fetch
@@ -207,3 +214,43 @@ def test_two_arg_constructor_still_works() -> None:
     with patch("agentic_rag.ingestion.notion.chromadb.PersistentClient"):
         ing = NotionIngester(MagicMock(), MagicMock())
     assert ing.card_failures == 0
+
+
+def _pages(n: int) -> list[dict[str, Any]]:
+    return [_page(f"p{i}") for i in range(n)]
+
+
+async def test_delay_between_card_calls_not_before_first(tmp_path: Path) -> None:
+    store = CardStore(tmp_path / "catalog.json")
+    ing = _make(tmp_path, _chat('{"summary": "s", "tags": [], "items": []}'), store)
+    coll(ing).get.return_value = {"ids": [], "metadatas": []}
+    sleep = AsyncMock()
+    await _run(ing, _pages(3), [TextBlock("paragraph", "x")], sleep=sleep)
+    assert [c.args for c in sleep.await_args_list] == [(30.0,), (30.0,)]
+
+
+async def test_stops_cards_after_consecutive_failures(tmp_path: Path) -> None:
+    store = CardStore(tmp_path / "catalog.json")
+    chat = AsyncMock(chat=AsyncMock(side_effect=RuntimeError("429")))
+    ing = _make(tmp_path, chat, store)
+    coll(ing).get.return_value = {"ids": [], "metadatas": []}
+    await _run(ing, _pages(5), [TextBlock("paragraph", "x")])
+    assert ing.card_failures == 3
+    assert chat.chat.await_count == 9  # 3 pages x 3 internal retries; pages 4-5 skipped
+    assert coll(ing).upsert.call_count == 5  # chunks still upserted
+    assert store.all() == []
+
+
+async def test_success_resets_consecutive_failures(tmp_path: Path) -> None:
+    store = CardStore(tmp_path / "catalog.json")
+    ok = CardFields("s", [], [], False)
+    err = RuntimeError("429")
+    chat = AsyncMock(chat=AsyncMock())
+    ing = _make(tmp_path, chat, store)
+    coll(ing).get.return_value = {"ids": [], "metadatas": []}
+    gen = AsyncMock(side_effect=[err, err, ok, err, err, ok])
+    with patch("agentic_rag.ingestion.notion.generate_card_fields", gen):
+        await _run(ing, _pages(6), [TextBlock("paragraph", "x")])
+    assert gen.await_count == 6
+    assert ing.card_failures == 4
+    assert len(store.all()) == 2

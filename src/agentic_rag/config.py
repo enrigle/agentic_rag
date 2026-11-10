@@ -80,11 +80,13 @@ class RedisConfig:
 
 @dataclass
 class CatalogConfig:
-    max_prompt_tokens: int = 8000
+    max_prompt_tokens: int = 4000
     prefilter_top_n: int = 30
     focus_top_k: int = 20
     history_turns: int = 3
-    max_page_chars: int = 24000
+    max_page_chars: int = 16000
+    card_delay_seconds: float = 30.0
+    max_consecutive_card_failures: int = 3
 
 
 @dataclass

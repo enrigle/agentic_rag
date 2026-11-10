@@ -161,10 +161,12 @@ def test_defaults_resolve_when_config_file_missing(tmp_path: Path) -> None:
 
 def test_catalog_defaults() -> None:
     cfg = RAGConfig()
-    assert cfg.catalog.max_prompt_tokens == 8000
+    assert cfg.catalog.max_prompt_tokens == 4000
     assert cfg.catalog.focus_top_k == 20
     assert cfg.catalog.history_turns == 3
-    assert cfg.catalog.max_page_chars == 24000
+    assert cfg.catalog.max_page_chars == 16000
+    assert cfg.catalog.card_delay_seconds == 30.0
+    assert cfg.catalog.max_consecutive_card_failures == 3
     assert cfg.catalog_path == Path("data/catalog.json")
 
 

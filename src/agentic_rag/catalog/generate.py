@@ -15,6 +15,7 @@ from agentic_rag.llm.json_reply import extract_json_object
 logger = logging.getLogger(__name__)
 
 MAX_ITEMS = 50
+DEFAULT_MAX_PAGE_CHARS = 16000
 
 
 @dataclass
@@ -25,7 +26,9 @@ class CardFields:
     items_truncated: bool
 
 
-def build_card_prompt(title: str, page_text: str, max_page_chars: int = 24000) -> str:
+def build_card_prompt(
+    title: str, page_text: str, max_page_chars: int = DEFAULT_MAX_PAGE_CHARS
+) -> str:
     return (
         "Describe this Notion page for a catalog. Reply with JSON only, no other text:\n"
         '{"summary": "2-3 sentences", "tags": ["short lowercase topic", ...], "items": [...]}\n'
@@ -69,7 +72,7 @@ async def generate_card_fields(
     title: str,
     page_text: str,
     retries: int = 3,
-    max_page_chars: int = 24000,
+    max_page_chars: int = DEFAULT_MAX_PAGE_CHARS,
 ) -> CardFields:
     """Retry RuntimeError from the backend with backoff. ValueError is not retried."""
     prompt = build_card_prompt(title, page_text, max_page_chars)

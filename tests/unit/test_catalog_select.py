@@ -106,3 +106,7 @@ def test_build_catalog_prompt_labels_passages_only_when_present() -> None:
     with_p = build_catalog_prompt("q?", hist, cards, [p])
     assert "Relevant passages" in with_p and "passage body" in with_p
     assert "user: hello" in with_p
+
+
+def test_extract_citations_clamps_huge_range() -> None:
+    assert extract_citations("see [1-10000000]", 3) == [1, 2, 3]
