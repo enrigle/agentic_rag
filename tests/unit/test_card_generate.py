@@ -112,6 +112,18 @@ def test_parse_tag_map_unknown_tags_map_to_self() -> None:
     }
 
 
+def test_tag_merge_prompt_asks_only_for_changed_tags() -> None:
+    prompt = build_tag_merge_prompt(["a", "b"])
+    assert "JSON" in prompt
+    assert "ONLY" in prompt
+    assert "omit" in prompt.lower()
+    assert "{}" in prompt
+
+
+def test_parse_tag_map_empty_object_maps_all_to_self() -> None:
+    assert parse_tag_map("{}", ["a", "b"]) == {"a": "a", "b": "b"}
+
+
 def test_apply_tag_map_dedupes() -> None:
     cards = [_card("a", ["claude-code", "anthropic"]), _card("b", ["x"])]
     out = apply_tag_map(cards, {"claude-code": "claude", "anthropic": "claude"})

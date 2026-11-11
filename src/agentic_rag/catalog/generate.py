@@ -94,8 +94,10 @@ async def generate_card_fields(
 
 def build_tag_merge_prompt(tags: list[str]) -> str:
     return (
-        "Merge synonym or near-duplicate tags. Reply with JSON only: an object mapping "
-        "each tag to the canonical lowercase tag to use. Tags to keep map to themselves.\n"
+        "Merge synonym or near-duplicate tags. Reply with JSON only: an object that "
+        "contains ONLY the tags that should change, each mapped to the canonical "
+        "lowercase tag to use. Omit every tag that stays the same. "
+        "If nothing merges, reply with {}.\n"
         f"Tags: {json.dumps(tags)}"
     )
 
