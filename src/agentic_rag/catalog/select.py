@@ -24,7 +24,7 @@ You answer questions about the user's Notion pages using ONLY the numbered cards
 
 
 def estimate_tokens(text: str) -> int:
-    return len(text) // 4
+    return len(text) // 3  # Groq counts ~1.25x more than len/4
 
 
 def format_card(n: int, card: PageCard, parent_title: str | None = None) -> str:
@@ -56,10 +56,20 @@ def select_cards(
     if estimate_tokens(block) <= max_prompt_tokens:
         return list(cards)
     if query_vec is None:
-        return cards[:top_n]
-    # sorted() is stable: ties keep stored order
-    ranked = sorted(cards, key=lambda c: _cosine(query_vec, c.embedding), reverse=True)
-    return ranked[:top_n]
+        ranked = list(cards)
+    else:
+        # sorted() is stable: ties keep stored order
+        ranked = sorted(
+            cards, key=lambda c: _cosine(query_vec, c.embedding), reverse=True
+        )
+    picked: list[PageCard] = []
+    lines: list[str] = []
+    for card in ranked[:top_n]:
+        lines.append(format_card(len(lines) + 1, card))
+        if picked and estimate_tokens("\n".join(lines)) > max_prompt_tokens:
+            break
+        picked.append(card)
+    return picked
 
 
 def build_catalog_prompt(

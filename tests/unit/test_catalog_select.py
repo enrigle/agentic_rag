@@ -3,6 +3,7 @@ from agentic_rag.catalog.select import (
     build_catalog_prompt,
     cards_to_sources,
     ensure_incomplete_note,
+    estimate_tokens,
     extract_citations,
     format_card,
     select_cards,
@@ -49,20 +50,56 @@ def test_select_cards_returns_all_when_under_budget() -> None:
     assert select_cards(cards, [1.0], 10_000, 1) == cards
 
 
-def test_select_cards_prefilters_by_similarity_when_over_budget() -> None:
-    cards = [
+def _est(cards: list[PageCard]) -> int:
+    return estimate_tokens("\n".join(format_card(i, c) for i, c in enumerate(cards, 1)))
+
+
+def _ranked_cards() -> list[PageCard]:
+    return [
         _card("far", [0.0, 1.0]),
         _card("none"),
         _card("near", [1.0, 0.1]),
         _card("mid", [1.0, 1.0]),
     ]
-    got = select_cards(cards, [1.0, 0.0], 1, 2)
+
+
+def test_estimate_tokens_is_len_over_three() -> None:
+    assert estimate_tokens("abcdef") == 2
+
+
+def test_select_cards_fills_budget_in_cosine_order_when_over_budget() -> None:
+    cards = _ranked_cards()
+    budget = _est([cards[2], cards[3]])  # fits exactly two, not three
+    assert _est(cards[:3]) > budget
+    got = select_cards(cards, [1.0, 0.0], budget, 10)
     assert [c.page_id for c in got] == ["near", "mid"]
 
 
-def test_select_cards_without_query_vec_takes_first_n() -> None:
+def test_select_cards_over_budget_never_exceeds_budget() -> None:
+    cards = [_card(str(i), [1.0, i / 10]) for i in range(20)]
+    budget = _est(cards) // 2
+    got = select_cards(cards, [1.0, 0.0], budget, 100)
+    assert 1 < len(got) < len(cards)
+    assert _est(got) <= budget
+
+
+def test_select_cards_single_oversized_card_still_returned() -> None:
+    cards = [_card("big", [1.0, 0.0], items=["x" * 500]), _card("b", [0.0, 1.0])]
+    got = select_cards(cards, [1.0, 0.0], 5, 10)
+    assert [c.page_id for c in got] == ["big"]
+
+
+def test_select_cards_top_n_caps_count_when_budget_allows_more() -> None:
+    cards = _ranked_cards()
+    got = select_cards(cards, [1.0, 0.0], _est(cards) - 1, 2)
+    assert [c.page_id for c in got] == ["near", "mid"]
+
+
+def test_select_cards_without_query_vec_takes_first_that_fit() -> None:
     cards = [_card("1"), _card("2"), _card("3")]
-    assert select_cards(cards, None, 1, 2) == cards[:2]
+    budget = _est(cards[:2])
+    assert select_cards(cards, None, budget, 10) == cards[:2]
+    assert select_cards(cards, None, budget, 1) == cards[:1]
 
 
 def test_extract_citations_ignores_out_of_range() -> None:
