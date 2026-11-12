@@ -106,6 +106,17 @@ async def test_catalog_route_returns_cited_cards_and_note(tmp_path: Path) -> Non
     assert r.answer.endswith("Found 1 pages; this list may be incomplete.")
 
 
+async def test_catalog_route_markdown_link_only_citation(tmp_path: Path) -> None:
+    coord, _, _, _ = _build(
+        tmp_path,
+        [_d("catalog")],
+        cards=[_card("a", "A"), _card("b", "B")],
+        answer="See [B](https://n/b)",
+    )
+    r = await coord.query("list")
+    assert [s.id for s in r.sources] == ["b"]
+
+
 async def test_catalog_route_without_catalog_file(tmp_path: Path) -> None:
     rag = _source("rag", [_sr("p1_chunk_0")])
     coord, _, _, _ = _build(tmp_path, [_d("catalog", "the standalone")], [rag])

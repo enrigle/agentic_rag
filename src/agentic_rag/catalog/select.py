@@ -10,7 +10,7 @@ from agentic_rag.models import ChatMessage, SearchResult
 
 INCOMPLETE_NOTE = "Found {n} pages; this list may be incomplete."
 
-_CITATION = re.compile(r"\[(\d+(?:\s*[,\u2013-]\s*\d+)*)\]")
+_CITATION = re.compile(r"[\[\u3010](\d+(?:\s*[,\u2013-]\s*\d+)*)[\]\u3011]")
 _RANGE_SPLIT = re.compile(r"\s*([,\u2013-])\s*")
 
 _RULES = """\
@@ -125,6 +125,20 @@ def extract_citations(answer: str, n_cards: int) -> list[int]:
             if 1 <= n <= n_cards and n not in seen:
                 seen.append(n)
     return seen
+
+
+def cited_card_indices(answer: str, cards: list[PageCard]) -> list[int]:
+    """Numeric citations; else cards whose url or title (>=4 chars) is in the answer."""
+    cited = extract_citations(answer, len(cards))
+    if cited:
+        return cited
+    low = answer.lower()
+    return [
+        i
+        for i, c in enumerate(cards, 1)
+        if c.url in answer
+        or (len(c.title.strip()) >= 4 and c.title.strip().lower() in low)
+    ]
 
 
 def cards_to_sources(cards: list[PageCard], cited: list[int]) -> list[SearchResult]:

@@ -10,7 +10,7 @@ import time
 from agentic_rag.catalog.select import (
     cards_to_sources,
     ensure_incomplete_note,
-    extract_citations,
+    cited_card_indices,
     select_cards,
 )
 from agentic_rag.catalog.store import CardStore, PageCard
@@ -257,7 +257,7 @@ class PipelineCoordinator:
         answer = await self._synthesizer.synthesize_catalog(
             user_query, ctx.chat_history, cards, []
         )
-        cited = extract_citations(answer, len(cards))
+        cited = cited_card_indices(answer, cards)
         return ensure_incomplete_note(answer, len(cited)), cards_to_sources(
             cards, cited
         )
@@ -282,7 +282,7 @@ class PipelineCoordinator:
         answer = await self._synthesizer.synthesize_catalog(
             user_query, ctx.chat_history, cards, chunks
         )
-        cited = extract_citations(answer, len(cards))
+        cited = cited_card_indices(answer, cards)
         return ensure_incomplete_note(answer, len(cited)), (
             cards_to_sources(cards, cited) + chunks
         )

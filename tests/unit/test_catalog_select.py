@@ -2,6 +2,7 @@ from agentic_rag.catalog.select import (
     INCOMPLETE_NOTE,
     build_catalog_prompt,
     cards_to_sources,
+    cited_card_indices,
     ensure_incomplete_note,
     estimate_tokens,
     extract_citations,
@@ -147,3 +148,34 @@ def test_build_catalog_prompt_labels_passages_only_when_present() -> None:
 
 def test_extract_citations_clamps_huge_range() -> None:
     assert extract_citations("see [1-10000000]", 3) == [1, 2, 3]
+
+
+def test_extract_citations_full_width_brackets() -> None:
+    assert extract_citations("A \u30101\u3011", 3) == [1]
+    assert extract_citations("A \u30101, 2\u3011 \u30102\u20133\u3011", 3) == [1, 2, 3]
+
+
+def _titled(pid: str, title: str) -> PageCard:
+    c = _card(pid)
+    c.title = title
+    return c
+
+
+def test_cited_card_indices_numeric_wins_over_title() -> None:
+    cards = [_titled("a", "Alpha"), _titled("b", "Beta")]
+    assert cited_card_indices("Beta page, see [1]", cards) == [1]
+
+
+def test_cited_card_indices_falls_back_to_url() -> None:
+    cards = [_card("a"), _card("b")]
+    assert cited_card_indices("see [x](https://n/b)", cards) == [2]
+
+
+def test_cited_card_indices_falls_back_to_title_case_insensitive() -> None:
+    cards = [_titled("a", "Vectorless RAG"), _titled("b", "Other")]
+    assert cited_card_indices("about vectorless rag here", cards) == [1]
+
+
+def test_cited_card_indices_ignores_short_title() -> None:
+    cards = [_titled("a", "RAG")]
+    assert cited_card_indices("about rag here", cards) == []
