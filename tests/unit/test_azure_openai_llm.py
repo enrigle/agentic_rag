@@ -124,3 +124,16 @@ async def test_chat_raises_on_empty_choices(llm: AzureOpenAILLM) -> None:
 def test_cloud_llm_has_no_embed(llm: AzureOpenAILLM) -> None:
     # Embeddings stay local: the cloud backend does not offer embed() at all.
     assert not hasattr(llm, "embed")
+
+
+async def test_chat_json_output_sets_response_format(llm: AzureOpenAILLM) -> None:
+    create = AsyncMock(return_value=_make_completion("{}"))
+    llm._client.chat.completions.create = create  # type: ignore[method-assign]
+
+    await llm.chat("p", json_output=True)
+    await llm.chat("p")
+
+    assert create.await_args_list[0].kwargs["response_format"] == {
+        "type": "json_object"
+    }
+    assert "response_format" not in create.await_args_list[1].kwargs

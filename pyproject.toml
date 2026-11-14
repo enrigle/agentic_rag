@@ -48,6 +48,11 @@ ignore_missing_imports = true
 [tool.ruff]
 exclude = ["eval.py", "ingest.py", "main.py"]
 
+[tool.ruff.lint]
+# Pin the rule set: ruff 0.17+ widened its defaults, and the commit-gate hook
+# runs the latest ruff via uvx while the project pins an older one.
+select = ["E4", "E7", "E9", "F"]
+
 [tool.ruff.lint.per-file-ignores]
 "app.py" = ["E402"]  # logging suppression must precede imports that trigger those loggers
 

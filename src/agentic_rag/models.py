@@ -33,6 +33,7 @@ class QueryResult:
     trace_id: str | None = (
         None  # Langfuse trace for score_trace(); None when tracing is off
     )
+    route: str = "chunks"
 
 
 @dataclass

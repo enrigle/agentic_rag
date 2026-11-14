@@ -1,7 +1,204 @@
 [
   {
-    "id": "q1",
-    "query": "What is the process for X?",
-    "expected_keywords": ["keyword1", "keyword2"]
+    "id": "list-skills",
+    "query": "give me my skills",
+    "expected_route": "catalog",
+    "expected_pages": [
+      "Agentic Skill"
+    ],
+    "expected_keywords": [
+      "test-driven-development",
+      "spec-driven-development"
+    ]
+  },
+  {
+    "id": "list-eval-skills",
+    "query": "which eval skills do I have saved?",
+    "expected_route": "catalog",
+    "expected_pages": [
+      "Evals skills"
+    ],
+    "expected_keywords": [
+      "error-analysis"
+    ]
+  },
+  {
+    "id": "list-claude-commands",
+    "query": "list the Claude Code slash commands I saved",
+    "expected_route": "catalog",
+    "expected_pages": [
+      "Claude Commands"
+    ],
+    "expected_keywords": [
+      "/compact",
+      "/rewind"
+    ]
+  },
+  {
+    "id": "topic-claude",
+    "query": "give me all information related to Claude",
+    "expected_route": "catalog",
+    "expected_pages": [
+      "Claude Commands",
+      "Claude Best Practices"
+    ],
+    "forbidden_pages": [
+      "Piscina",
+      "Supercloración"
+    ]
+  },
+  {
+    "id": "topic-pool",
+    "query": "give me all information related to my pool",
+    "expected_route": "catalog",
+    "expected_pages": [
+      "Piscina",
+      "Supercloración"
+    ],
+    "forbidden_pages": [
+      "Claude Commands"
+    ]
+  },
+  {
+    "id": "list-books",
+    "query": "what books do I have recommended?",
+    "expected_route": "catalog",
+    "expected_pages": [
+      "Book recommendations"
+    ],
+    "expected_keywords": [
+      "Designing Machine Learning Systems"
+    ]
+  },
+  {
+    "id": "lookup-claude-certificate",
+    "query": "do I have info on the Claude architect certificate?",
+    "expected_route": "catalog",
+    "expected_answer_start": "No"
+  },
+  {
+    "id": "lookup-terraform",
+    "query": "do I have any notes about Terraform?",
+    "expected_route": "catalog",
+    "expected_answer_start": "No"
+  },
+  {
+    "id": "lookup-kubernetes",
+    "query": "do I have notes about Kubernetes?",
+    "expected_route": "catalog",
+    "expected_pages": [
+      "Kubernetes overview"
+    ],
+    "expected_answer_start": "Yes"
+  },
+  {
+    "id": "lookup-jane-eyre",
+    "query": "do I have anything about Jane Eyre?",
+    "expected_route": "catalog",
+    "expected_pages": [
+      "Jane Eyre and the Invention of Self"
+    ],
+    "expected_answer_start": "Yes"
+  },
+  {
+    "id": "lookup-vectorless",
+    "query": "do I have notes on vectorless RAG?",
+    "expected_route": "catalog",
+    "expected_pages": [
+      "Vectorless RAG"
+    ],
+    "expected_answer_start": "Yes"
+  },
+  {
+    "id": "followup-summarize-tfidf",
+    "history": [
+      {
+        "role": "user",
+        "content": "do I have notes on tf-idf?"
+      },
+      {
+        "role": "assistant",
+        "content": "Yes. You have one page: [1] tf-idf."
+      }
+    ],
+    "query": "summarize it",
+    "expected_route": "chunks",
+    "expected_pages": [
+      "tf-idf"
+    ],
+    "expected_keywords": [
+      "cosine"
+    ]
+  },
+  {
+    "id": "followup-pool-pump",
+    "history": [
+      {
+        "role": "user",
+        "content": "dame mis notas de la piscina"
+      },
+      {
+        "role": "assistant",
+        "content": "Tienes páginas de la piscina como Piscina, pH y cloro y Supercloración."
+      }
+    ],
+    "query": "¿cuántas horas debe funcionar la depuradora después de la supercloración?",
+    "expected_route": "chunks",
+    "expected_pages": [
+      "Supercloración"
+    ],
+    "expected_keywords": [
+      "8"
+    ]
+  },
+  {
+    "id": "followup-books-author",
+    "history": [
+      {
+        "role": "user",
+        "content": "what books do I have recommended?"
+      },
+      {
+        "role": "assistant",
+        "content": "Your Book recommendations page lists books by Nitin Seth, Tanmoy Chakraborty, Chip Huyen and Mustafa Suleyman."
+      }
+    ],
+    "query": "which ones are by Chip Huyen?",
+    "expected_pages": [
+      "Book recommendations"
+    ],
+    "expected_keywords": [
+      "AI Engineering",
+      "Designing Machine Learning Systems"
+    ]
+  },
+  {
+    "id": "qa-azure-datastore",
+    "query": "what does my Azure ML page say about datastores?",
+    "expected_route": "chunks",
+    "expected_pages": [
+      "Azure ML"
+    ],
+    "expected_keywords": [
+      "datastore"
+    ]
+  },
+  {
+    "id": "qa-santander-governance",
+    "query": "how does Santander AI govern its open-source projects?",
+    "expected_pages": [
+      "Santander AI"
+    ]
+  },
+  {
+    "id": "qa-pageindex",
+    "query": "what is PageIndex in vectorless RAG?",
+    "expected_route": "chunks",
+    "expected_pages": [
+      "Vectorless RAG"
+    ],
+    "expected_keywords": [
+      "tree"
+    ]
   }
 ]

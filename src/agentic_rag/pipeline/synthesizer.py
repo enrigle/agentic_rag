@@ -7,7 +7,9 @@ import logging
 from pathlib import Path
 
 from agentic_rag.llm.base import ChatModel
-from agentic_rag.models import PipelineContext
+from agentic_rag.catalog.select import build_catalog_prompt
+from agentic_rag.catalog.store import PageCard
+from agentic_rag.models import ChatMessage, PipelineContext, SearchResult
 from agentic_rag.observability.langfuse import observation as _lf_obs
 
 logger = logging.getLogger(__name__)
@@ -76,4 +78,17 @@ class Synthesizer:
         )
 
         with _lf_obs("synthesize", as_type="generation", input={"query": query}):
+            return await self._llm.chat(prompt)
+
+    async def synthesize_catalog(
+        self,
+        query: str,
+        history: list[ChatMessage],
+        cards: list[PageCard],
+        passages: list[SearchResult],
+    ) -> str:
+        prompt = build_catalog_prompt(query, history, cards, passages)
+        with _lf_obs(
+            "synthesize_catalog", as_type="generation", input={"query": query}
+        ):
             return await self._llm.chat(prompt)

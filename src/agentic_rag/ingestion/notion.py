@@ -16,6 +16,13 @@ from PIL import Image
 from notion_client import AsyncClient
 from notion_client.helpers import async_collect_paginated_api
 
+from agentic_rag.catalog.generate import (
+    apply_tag_map,
+    build_tag_merge_prompt,
+    generate_card_fields,
+    parse_tag_map,
+)
+from agentic_rag.catalog.store import CardStore, PageCard
 from agentic_rag.config import RAGConfig
 from agentic_rag.ingestion.base import BaseIngester, IngestStats
 from agentic_rag.ingestion.chunker import (
@@ -24,7 +31,7 @@ from agentic_rag.ingestion.chunker import (
     _extract_plain_text,
     _get_title,
 )
-from agentic_rag.llm.base import Embedder
+from agentic_rag.llm.base import ChatModel, Embedder
 from agentic_rag.retrieval.bm25 import BM25Retriever
 
 logger = logging.getLogger(__name__)
@@ -54,9 +61,21 @@ class NotionIngester(BaseIngester):
     does not support vision/multimodal inputs.
     """
 
-    def __init__(self, config: RAGConfig, llm: Embedder) -> None:
+    def __init__(
+        self,
+        config: RAGConfig,
+        llm: Embedder,
+        chat_llm: ChatModel | None = None,
+        card_store: CardStore | None = None,
+    ) -> None:
         self._config = config
         self._llm = llm
+        self._chat_llm = chat_llm
+        self._card_store = card_store
+        self.card_failures = 0
+        self._consecutive_failures = 0
+        self._card_calls = 0
+        self._cards_stopped = False
         self._chroma = chromadb.PersistentClient(path=str(config.chroma_path))
         self._collection = self._chroma.get_or_create_collection(
             name=config.collection_name,
@@ -121,6 +140,14 @@ class NotionIngester(BaseIngester):
             )
 
         total_chunks = 0
+        self.card_failures = 0
+        self._consecutive_failures = 0
+        self._card_calls = 0
+        self._cards_stopped = False
+        cards_built = 0
+        card_store = self._card_store
+        catalog_on = self._chat_llm is not None and card_store is not None
+        tags_before = self._raw_tags() if catalog_on else set()
 
         for page in pages:
             page_id: str = page["id"]
@@ -130,6 +157,7 @@ class NotionIngester(BaseIngester):
             )
             last_edited_time: str = page.get("last_edited_time", "")
 
+            needs_chunks = True
             # Skip unchanged pages unless doing a full re-index
             if not full:
                 existing = self._collection.get(
@@ -145,12 +173,31 @@ class NotionIngester(BaseIngester):
                     and _existing_metas[0].get("last_edited_time") == last_edited_time
                     and _existing_metas[0].get("doc_format") == INDEX_DOC_FORMAT
                 ):
-                    logger.debug("Page '%s' unchanged — skipping", title)
-                    continue
+                    needs_chunks = False
 
-            blocks = await self._fetch_text_from_blocks(notion, ollama_client, page_id)
+            needs_card = False
+            if catalog_on:
+                card = self._card_store.get(page_id)  # type: ignore[union-attr]
+                needs_card = not self._cards_stopped and (
+                    full or card is None or card.last_edited_time != last_edited_time
+                )
+            if not (needs_chunks or needs_card):
+                logger.debug("Page '%s' unchanged — skipping", title)
+                continue
+
+            child_ids: list[str] = []
+            blocks = await self._fetch_text_from_blocks(
+                notion, ollama_client, page_id, child_ids=child_ids
+            )
             if not blocks:
                 logger.debug("Page '%s' produced no indexable text — skipping", title)
+                continue
+
+            if needs_card and await self._build_card(
+                page, title, page_url, blocks, child_ids
+            ):
+                cards_built += 1
+            if not needs_chunks:
                 continue
 
             chunks = _chunk_text(
@@ -208,6 +255,9 @@ class NotionIngester(BaseIngester):
                 total_chunks += len(ids)
                 logger.info("Indexed '%s': %d chunk(s)", title, len(ids))
 
+        if catalog_on:
+            await self._finish_catalog(stale_ids, tags_before, cards_built)
+
         self._rebuild_bm25()
         logger.info(
             "Done. Indexed %d pages, %d chunks into ChromaDB at %s.",
@@ -235,6 +285,90 @@ class NotionIngester(BaseIngester):
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
+
+    def _raw_tags(self) -> set[str]:
+        assert self._card_store is not None
+        return {t for c in self._card_store.all() for t in c.tags}
+
+    async def _build_card(
+        self,
+        page: dict[str, Any],
+        title: str,
+        page_url: str,
+        blocks: list[TextBlock],
+        child_ids: list[str],
+    ) -> bool:
+        """Generate and upsert the page's card. On failure keep the old card, return False."""
+        assert self._chat_llm is not None and self._card_store is not None
+        if self._card_calls:
+            await asyncio.sleep(self._config.catalog.card_delay_seconds)
+        self._card_calls += 1
+        try:
+            fields = await generate_card_fields(
+                self._chat_llm,
+                title,
+                "\n".join(b.text for b in blocks),
+                max_page_chars=self._config.catalog.max_page_chars,
+            )
+            embedding = await self._llm.embed(f"{title}\n{fields.summary}")
+        except (RuntimeError, ValueError) as exc:
+            logger.warning("Card generation failed for '%s': %s", title, exc)
+            self.card_failures += 1
+            self._consecutive_failures += 1
+            limit = self._config.catalog.max_consecutive_card_failures
+            if self._consecutive_failures >= limit:
+                self._cards_stopped = True
+                logger.warning(
+                    "Catalog: stopping card generation after %d consecutive failures "
+                    "(likely Groq rate limit); remaining pages get cards next run",
+                    limit,
+                )
+            return False
+        self._consecutive_failures = 0
+        parent = page.get("parent", {})
+        self._card_store.upsert(
+            PageCard(
+                page_id=page["id"],
+                title=title,
+                url=page_url,
+                last_edited_time=page.get("last_edited_time", ""),
+                summary=fields.summary,
+                tags=fields.tags,
+                items=fields.items,
+                items_truncated=fields.items_truncated,
+                parent_id=parent.get("page_id")
+                if parent.get("type") == "page_id"
+                else None,
+                child_ids=child_ids,
+                embedding=embedding,
+            )
+        )
+        return True
+
+    async def _finish_catalog(
+        self, stale_ids: set[str], tags_before: set[str], cards_built: int
+    ) -> None:
+        """Drop stale cards, merge synonym tags if the raw tags changed, then save."""
+        assert self._chat_llm is not None and self._card_store is not None
+        store = self._card_store
+        store.delete(stale_ids)
+        raw_tags = self._raw_tags()
+        if raw_tags != tags_before and not self._cards_stopped:
+            tags = sorted(raw_tags)
+            try:
+                reply = await self._chat_llm.chat(
+                    build_tag_merge_prompt(tags), json_output=True
+                )
+                tag_map = parse_tag_map(reply, tags)
+            except (RuntimeError, ValueError) as exc:
+                logger.warning("Tag merge failed, keeping unmerged tags: %s", exc)
+            else:
+                for card in apply_tag_map(store.all(), tag_map):
+                    store.upsert(card)
+        store.save()
+        logger.info(
+            "Catalog: %d cards built, %d failed", cards_built, self.card_failures
+        )
 
     def _rebuild_bm25(self) -> None:
         """Rebuild BM25 index from all documents in the collection."""
@@ -291,6 +425,7 @@ class NotionIngester(BaseIngester):
         block_id: str,
         depth: int = 0,
         max_depth: int = 10,
+        child_ids: list[str] | None = None,
     ) -> list[TextBlock]:
         """Recursively extract typed text blocks from all Notion blocks.
 
@@ -333,6 +468,8 @@ class NotionIngester(BaseIngester):
             # child_page: add title as a reference but skip recursing
             # (child pages are indexed separately via notion.search())
             if block_type == "child_page":
+                if child_ids is not None:
+                    child_ids.append(block["id"])
                 child_title = block.get("child_page", {}).get("title", "")
                 if child_title:
                     typed_lines.append(
@@ -347,7 +484,7 @@ class NotionIngester(BaseIngester):
             # Recursively fetch nested children (toggles, callouts, nested lists, etc.)
             if block.get("has_children"):
                 child_blocks = await self._fetch_text_from_blocks(
-                    notion, ollama_client, block["id"], depth + 1, max_depth
+                    notion, ollama_client, block["id"], depth + 1, max_depth, child_ids
                 )
                 typed_lines.extend(child_blocks)
 

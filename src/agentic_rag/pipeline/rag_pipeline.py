@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 
+from agentic_rag.catalog.store import CardStore
 from agentic_rag.cache.semantic_cache import SemanticCache
 from agentic_rag.config import RAGConfig, load_config
 from agentic_rag.llm.base import ChatModel, Embedder
@@ -12,6 +13,7 @@ from agentic_rag.llm.openai_compat import AzureOpenAILLM, GroqLLM
 from agentic_rag.llm.sentence_transformers_llm import SentenceTransformersLLM
 from agentic_rag.pipeline.coordinator import PipelineCoordinator
 from agentic_rag.pipeline.memory import ConversationMemory
+from agentic_rag.pipeline.router import QueryRouter
 from agentic_rag.pipeline.sources import RAGSource, WebSource
 from agentic_rag.pipeline.synthesizer import Synthesizer
 from agentic_rag.retrieval.bm25 import BM25Retriever
@@ -52,23 +54,27 @@ def make_synth_llm(config: RAGConfig) -> ChatModel:
     return OllamaLLM(config.llm)
 
 
-def create_pipeline(config: RAGConfig | None = None) -> PipelineCoordinator:
+def create_pipeline(
+    config: RAGConfig | None = None, use_cache: bool = True
+) -> PipelineCoordinator:
     """Wire PipelineCoordinator from config.
 
     - Embeddings use make_embed_llm (embed_backend: Ollama or sentence-transformers).
     - Synthesis uses GroqLLM when GROQ_API_KEY is set, then AzureOpenAILLM when
       azure_openai.endpoint is set, otherwise falls back to OllamaLLM.
-    - SemanticCache is always attached; it fails open if Redis is unreachable.
+    - SemanticCache is attached unless use_cache is False (e.g. the eval); it
+      fails open if Redis is unreachable.
     """
     if config is None:
         config = load_config()
 
     llm = make_embed_llm(config)
-    hybrid = HybridRetriever(ChromaVectorStore(config), BM25Retriever(config), config)
+    vector_store = ChromaVectorStore(config)
+    hybrid = HybridRetriever(vector_store, BM25Retriever(config), config)
 
     synth_llm = make_synth_llm(config)
 
-    cache = SemanticCache(config.redis, llm)
+    cache = SemanticCache(config.redis, llm) if use_cache else None
 
     return PipelineCoordinator(
         sources=[RAGSource(llm, hybrid), WebSource()],
@@ -82,4 +88,8 @@ def create_pipeline(config: RAGConfig | None = None) -> PipelineCoordinator:
         max_tool_calls=config.max_tool_calls,
         cache=cache,
         embed_llm=llm,
+        router=QueryRouter(synth_llm, config.catalog.history_turns),
+        card_store=CardStore(config.catalog_path),
+        page_fetcher=vector_store,
+        catalog_config=config.catalog,
     )
