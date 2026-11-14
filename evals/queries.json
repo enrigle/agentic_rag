@@ -88,10 +88,10 @@
   {
     "id": "followup-pool-pump",
     "history": [
-      {"role": "user", "content": "give me my pool notes"},
-      {"role": "assistant", "content": "You have pool pages such as Piscina, pH y cloro and Supercloración."}
+      {"role": "user", "content": "dame mis notas de la piscina"},
+      {"role": "assistant", "content": "Tienes páginas de la piscina como Piscina, pH y cloro y Supercloración."}
     ],
-    "query": "how long should the pump run after superchlorination?",
+    "query": "¿cuántas horas debe funcionar la depuradora después de la supercloración?",
     "expected_route": "chunks",
     "expected_pages": ["Supercloración"],
     "expected_keywords": ["8"]
