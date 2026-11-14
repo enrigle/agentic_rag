@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import sys
@@ -89,11 +90,25 @@ def eval_item_from_dict(raw: dict[str, Any]) -> EvalItem:
     )
 
 
+_TEXT_TRANSLATION = str.maketrans(
+    {
+        **dict.fromkeys(map(ord, "\u2010\u2011\u2012\u2013\u2014\u2015\u2212"), "-"),
+        0x00A0: " ",
+        0x202F: " ",
+    }
+)
+
+
+def normalize_text(text: str) -> str:
+    """Map Unicode dashes/hyphens to '-', no-break spaces to ' ', then lowercase."""
+    return text.translate(_TEXT_TRANSLATION).lower()
+
+
 def check_item(item: EvalItem, result: QueryResult) -> list[str]:
     """Return failure messages for one result; an empty list means pass."""
     failures: list[str] = []
     titles = [s.title for s in result.sources]
-    answer = result.answer.strip().lower()
+    answer = normalize_text(result.answer.strip())
     if item.expected_route is not None and result.route != item.expected_route:
         failures.append(f"route {result.route!r} != {item.expected_route!r}")
     failures += [f"missing page {t!r}" for t in item.expected_pages if t not in titles]
@@ -101,12 +116,12 @@ def check_item(item: EvalItem, result: QueryResult) -> list[str]:
         f"forbidden page {t!r} cited" for t in item.forbidden_pages if t in titles
     ]
     start = item.expected_answer_start
-    if start is not None and not answer.startswith(start.lower()):
+    if start is not None and not answer.startswith(normalize_text(start)):
         failures.append(f"answer does not start with {start!r}")
     failures += [
         f"missing keyword {k!r}"
         for k in item.expected_keywords
-        if k.lower() not in answer
+        if normalize_text(k) not in answer
     ]
     return failures
 
@@ -208,14 +223,19 @@ class Evaluator:
 
         print("Done.")
 
-    async def run_auto(self) -> int:
-        """Run every item against its checks. Return 0 if all pass, else 1."""
+    async def run_auto(self, delay_seconds: float = 60.0) -> int:
+        """Run every item against its checks. Return 0 if all pass, else 1.
+
+        Sleeps delay_seconds between items to stay under provider rate limits.
+        """
         failed = 0
         raw_items = _read_queries()
         if not raw_items:
             print("FAIL no eval items in queries.json")
             return 1
         for index, raw in enumerate(raw_items):
+            if index > 0 and delay_seconds > 0:
+                await asyncio.sleep(delay_seconds)
             try:
                 item = eval_item_from_dict(raw)
             except ValueError as exc:

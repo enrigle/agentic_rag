@@ -30,11 +30,17 @@ if __name__ == "__main__":
     parser.add_argument(
         "--auto", action="store_true", help="Run automated checks; exit 1 on any fail"
     )
+    parser.add_argument(
+        "--delay",
+        type=float,
+        default=60.0,
+        help="Seconds to sleep between items with --auto (rate limits)",
+    )
     args = parser.parse_args()
 
     evaluator = Evaluator()
     if args.auto:
-        sys.exit(asyncio.run(evaluator.run_auto()))
+        sys.exit(asyncio.run(evaluator.run_auto(args.delay)))
     elif args.report:
         evaluator.report()
     else:

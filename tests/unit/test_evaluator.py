@@ -136,7 +136,7 @@ async def test_run_auto_returns_1_on_any_failure(tmp_path: Path) -> None:
     with patch.object(ev, "QUERIES_FILE", queries):
         evaluator = ev.Evaluator()
         evaluator._pipeline = pipeline
-        assert await evaluator.run_auto() == 1
+        assert await evaluator.run_auto(delay_seconds=0) == 1
     assert pipeline.query.await_count == 2
     assert all(c.kwargs["use_web"] is False for c in pipeline.query.await_args_list)
     pipeline.seed_history.assert_called_once()
@@ -155,7 +155,7 @@ async def test_run_auto_returns_0_when_all_pass(tmp_path: Path) -> None:
     with patch.object(ev, "QUERIES_FILE", queries):
         evaluator = ev.Evaluator()
         evaluator._pipeline = pipeline
-        assert await evaluator.run_auto() == 0
+        assert await evaluator.run_auto(delay_seconds=0) == 0
 
 
 @pytest.mark.asyncio
@@ -163,7 +163,7 @@ async def test_run_auto_returns_1_when_no_items(tmp_path: Path) -> None:
     queries = tmp_path / "queries.json"
     queries.write_text("[]")
     with patch.object(ev, "QUERIES_FILE", queries):
-        assert await ev.Evaluator().run_auto() == 1
+        assert await ev.Evaluator().run_auto(delay_seconds=0) == 1
 
 
 def test_get_pipeline_builds_without_semantic_cache() -> None:
@@ -171,3 +171,60 @@ def test_get_pipeline_builds_without_semantic_cache() -> None:
         evaluator = ev.Evaluator()
         evaluator._get_pipeline()
     assert create.call_args.kwargs["use_cache"] is False
+
+
+@pytest.mark.parametrize(
+    "ch", ["\u2010", "\u2011", "\u2012", "\u2013", "\u2014", "\u2015", "\u2212"]
+)
+def test_normalize_text_maps_dashes(ch: str) -> None:
+    assert ev.normalize_text(f"A{ch}B") == "a-b"
+
+
+@pytest.mark.parametrize("ch", ["\u00a0", "\u202f"])
+def test_normalize_text_maps_spaces(ch: str) -> None:
+    assert ev.normalize_text(f"A{ch}B") == "a b"
+
+
+def test_check_item_keyword_with_unicode_hyphen() -> None:
+    item = _item(expected_keywords=["test-driven-development"])
+    result = _result(answer="Use test\u2011driven\u2011development")
+    assert ev.check_item(item, result) == []
+
+
+def test_check_item_answer_start_after_nbsp() -> None:
+    item = _item(expected_answer_start="Yes ok")
+    assert ev.check_item(item, _result(answer="Yes\u00a0ok")) == []
+
+
+def _three_items(tmp_path: Path) -> Path:
+    queries = tmp_path / "queries.json"
+    queries.write_text(json.dumps([{"id": str(i), "query": "q"} for i in range(3)]))
+    return queries
+
+
+@pytest.mark.asyncio
+async def test_run_auto_sleeps_between_items_only(tmp_path: Path) -> None:
+    pipeline = MagicMock()
+    pipeline.query = AsyncMock(return_value=_result())
+    with (
+        patch.object(ev, "QUERIES_FILE", _three_items(tmp_path)),
+        patch("asyncio.sleep", new=AsyncMock()) as sleep,
+    ):
+        evaluator = ev.Evaluator()
+        evaluator._pipeline = pipeline
+        assert await evaluator.run_auto(delay_seconds=5) == 0
+    assert [c.args for c in sleep.await_args_list] == [(5,), (5,)]
+
+
+@pytest.mark.asyncio
+async def test_run_auto_zero_delay_does_not_sleep(tmp_path: Path) -> None:
+    pipeline = MagicMock()
+    pipeline.query = AsyncMock(return_value=_result())
+    with (
+        patch.object(ev, "QUERIES_FILE", _three_items(tmp_path)),
+        patch("asyncio.sleep", new=AsyncMock()) as sleep,
+    ):
+        evaluator = ev.Evaluator()
+        evaluator._pipeline = pipeline
+        await evaluator.run_auto(delay_seconds=0)
+    sleep.assert_not_awaited()
