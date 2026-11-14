@@ -8,8 +8,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import openai
 import pytest
 
-from agentic_rag.config import AzureOpenAIConfig
-from agentic_rag.llm.openai_compat import AzureOpenAILLM
+from agentic_rag.config import AzureOpenAIConfig, GroqConfig
+from agentic_rag.llm.openai_compat import AzureOpenAILLM, GroqLLM
 
 _VALID_CONFIG = AzureOpenAIConfig(
     endpoint="https://my-resource.openai.azure.com",
@@ -137,3 +137,26 @@ async def test_chat_json_output_sets_response_format(llm: AzureOpenAILLM) -> Non
         "type": "json_object"
     }
     assert "response_format" not in create.await_args_list[1].kwargs
+
+
+async def test_azure_json_output_has_no_reasoning_effort(llm: AzureOpenAILLM) -> None:
+    create = AsyncMock(return_value=_make_completion("{}"))
+    llm._client.chat.completions.create = create  # type: ignore[method-assign]
+
+    await llm.chat("p", json_output=True)
+
+    assert "reasoning_effort" not in create.await_args.kwargs
+
+
+async def test_groq_json_output_uses_low_reasoning_effort() -> None:
+    # gpt-oss on Groq can spend its whole reply on reasoning and return empty JSON.
+    with patch("agentic_rag.llm.openai_compat.openai.AsyncOpenAI") as mock_cls:
+        groq = GroqLLM(GroqConfig(api_key="k", model="openai/gpt-oss-20b"))
+    create = AsyncMock(return_value=_make_completion("{}"))
+    mock_cls.return_value.chat.completions.create = create
+
+    await groq.chat("p", json_output=True)
+    await groq.chat("p")
+
+    assert create.await_args_list[0].kwargs["reasoning_effort"] == "low"
+    assert "reasoning_effort" not in create.await_args_list[1].kwargs
