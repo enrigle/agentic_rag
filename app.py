@@ -1,7 +1,6 @@
 # app.py
 import logging
 import os
-import asyncio
 
 # transformers resets its own logger level to WARNING when first imported,
 # overriding any setLevel() below; it honors this env var at that reset. Must be
@@ -33,6 +32,7 @@ from agentic_rag.ui.answers import (
     to_result_dict,
 )
 from agentic_rag.ui.conversations import ConversationStore
+from agentic_rag.ui.event_loop import BackgroundLoop
 from agentic_rag.ui.ingest import BackgroundIngest
 
 
@@ -40,6 +40,11 @@ logger = logging.getLogger(__name__)
 
 
 # Process-wide singletons: st.cache_resource shares one instance across sessions.
+@st.cache_resource
+def get_loop() -> BackgroundLoop:
+    return BackgroundLoop()
+
+
 @st.cache_resource
 def get_config() -> RAGConfig:
     return load_config()
@@ -58,7 +63,7 @@ def get_conversations() -> ConversationStore:
 @st.cache_resource
 def _service_statuses() -> list[ServiceStatus]:
     cfg = load_config()
-    return asyncio.run(
+    return get_loop().run(
         run_checks(
             ollama_url=cfg.llm.base_url,
             redis_url=cfg.redis.url,
@@ -222,7 +227,7 @@ if last_result and not st.session_state.rated:
             entry_id = save(entry, _cfg.feedback_db_path)
             score_feedback(last_result, -1, note)
             with st.spinner("Analyzing failure..."):
-                category = asyncio.run(
+                category = get_loop().run(
                     classify_failure(
                         get_judge_llm(),
                         query=last_query,
@@ -244,7 +249,7 @@ if query:
     st.session_state.messages.append({"role": "user", "content": query, "result": None})
     with st.spinner("Thinking..."):
         result = to_result_dict(
-            asyncio.run(
+            get_loop().run(
                 get_pipeline().query(
                     query,
                     thread_id=st.session_state.thread_id,
