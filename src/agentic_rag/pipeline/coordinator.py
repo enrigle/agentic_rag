@@ -38,6 +38,22 @@ def page_ids_from_sources(sources: list[SearchResult]) -> list[str]:
     return list(dict.fromkeys(ids))
 
 
+def merge_by_source(results: list[SearchResult]) -> list[SearchResult]:
+    """Join chunks that share a source into one result, in first-seen order.
+
+    The citation unit is the page: one ``[N]`` in the prompt, one Sources entry.
+    The merged result keeps the id, score and similarity of its first chunk.
+    """
+    merged: dict[str, SearchResult] = {}
+    for r in results:
+        first = merged.get(r.source)
+        if first is None:
+            merged[r.source] = dataclasses.replace(r)
+        else:
+            first.content = f"{first.content}\n\n{r.content}"
+    return list(merged.values())
+
+
 class PipelineCoordinator:
     def __init__(
         self,
@@ -172,10 +188,9 @@ class PipelineCoordinator:
         return result
 
     def _remember_pages(self, thread_id: str, sources: list[SearchResult]) -> None:
-        titles = {s.id: s.title for s in sources}
+        titles = {_CHUNK_SUFFIX.sub("", s.id): s.title for s in sources}
         self._last_pages[thread_id] = [
-            (pid, titles.get(pid) or titles.get(f"{pid}_chunk_0", ""))
-            for pid in page_ids_from_sources(sources)
+            (pid, titles[pid]) for pid in page_ids_from_sources(sources)
         ]
 
     def _select_cards(self, ctx: PipelineContext) -> list[PageCard]:
@@ -214,7 +229,7 @@ class PipelineCoordinator:
                 logger.info(
                     "%s: %d relevant results, stopping", source.name, len(relevant)
                 )
-                ctx.results = relevant
+                ctx.results = merge_by_source(relevant)
                 break
             logger.info("%s: no relevant results, falling through", source.name)
 
@@ -227,8 +242,10 @@ class PipelineCoordinator:
         use_web: bool,
     ) -> tuple[str, list[SearchResult]]:
         if decision.focus_previous and previous and self._page_fetcher is not None:
-            ctx.results = await self._page_fetcher.fetch_by_page_ids(
-                [p for p, _ in previous], self._catalog_config.focus_top_k
+            ctx.results = merge_by_source(
+                await self._page_fetcher.fetch_by_page_ids(
+                    [p for p, _ in previous], self._catalog_config.focus_top_k
+                )
             )
         else:
             # Old construction (no router) keeps every source, as before.
@@ -283,6 +300,8 @@ class PipelineCoordinator:
             user_query, ctx.chat_history, cards, chunks
         )
         cited = cited_card_indices(answer, cards)
-        return ensure_incomplete_note(answer, len(cited)), (
-            cards_to_sources(cards, cited) + chunks
-        )
+        card_sources = cards_to_sources(cards, cited)
+        # A page already listed as a card must not appear again as a chunk source.
+        listed = {s.id for s in card_sources}
+        extra = [c for c in chunks if _CHUNK_SUFFIX.sub("", c.id) not in listed]
+        return ensure_incomplete_note(answer, len(cited)), card_sources + extra
