@@ -1,5 +1,6 @@
 """Query router: one LLM call rewrites a follow-up and picks a retrieval route."""
 
+import dataclasses
 import logging
 from dataclasses import dataclass
 from typing import Literal
@@ -30,6 +31,8 @@ class RouteDecision:
     standalone_query: str
     route: Route
     focus_previous: bool
+    # The question in the other language (English <-> Spanish); None if unknown.
+    translated_query: str | None = None
 
 
 def build_router_prompt(
@@ -52,8 +55,11 @@ def build_router_prompt(
         f"Conversation so far:\n{history_text}\n\n"
         f"Pages cited in the previous answer:\n{pages_text}\n\n"
         f"New question: {query}\n\n"
-        'Reply with JSON only: {"standalone_query": "...", "route": "catalog|chunks|both", '
-        '"focus_previous": true|false}'
+        "Write standalone_query in the same language as the new question.\n"
+        "translated_query: the same question written in Spanish. If the question is "
+        "already in Spanish, write it in English instead. Never copy it unchanged.\n\n"
+        'Reply with JSON only: {"standalone_query": "...", "translated_query": "...", '
+        '"route": "catalog|chunks|both", "focus_previous": true|false}'
     )
 
 
@@ -74,8 +80,15 @@ def parse_route(text: str, original_query: str) -> RouteDecision:
     if not isinstance(query, str) or not query.strip():
         return _fallback(original_query, "empty query")
     focus = data.get("focus_previous")
+    translated = data.get("translated_query")
+    if not isinstance(translated, str) or not translated.strip():
+        translated = None
+    elif translated.strip().casefold() == query.strip().casefold():
+        translated = None
+    else:
+        translated = translated.strip()
     return RouteDecision(
-        query.strip(), route, focus if isinstance(focus, bool) else False
+        query.strip(), route, focus if isinstance(focus, bool) else False, translated
     )
 
 
@@ -99,5 +112,5 @@ class QueryRouter:
             return _fallback(query, f"LLM error ({exc})")
         decision = parse_route(reply, query)
         if not history:
-            return RouteDecision(query, decision.route, decision.focus_previous)
+            return dataclasses.replace(decision, standalone_query=query)
         return decision

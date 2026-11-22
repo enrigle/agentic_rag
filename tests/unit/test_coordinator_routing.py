@@ -76,6 +76,7 @@ def _build(
     llm.chat = AsyncMock(return_value=answer)
     reranker = MagicMock(spec=CrossEncoderReranker)
     reranker.rerank = MagicMock(side_effect=lambda q, c, min_score=None: c)
+    reranker.top_k = 8
     embed = MagicMock()
     embed.embed = AsyncMock(return_value=[1.0, 0.0])
     fetcher = MagicMock()
@@ -153,12 +154,13 @@ async def test_cache_hit_keeps_route_and_sets_last_pages(tmp_path: Path) -> None
     cache.set = AsyncMock()
     coord, _, fetcher, _ = _build(
         tmp_path,
-        [_d("catalog"), _d("chunks", focus=True)],
+        [_d("chunks", focus=True)],
         cache=cache,
     )
     r = await coord.query("list")
-    assert r.route == "catalog"
+    assert r.route == "chunks"
     assert r.answer == "cached"
+    assert cast(Any, coord)._router.calls == []
     cache.get = AsyncMock(return_value=None)
     await coord.query("summarize it")
     fetcher.fetch_by_page_ids.assert_awaited_once_with(["p1"], 20)
@@ -331,3 +333,83 @@ async def test_both_route_does_not_list_a_cited_card_page_twice(tmp_path: Path) 
     r = await coord.query("what do I know")
 
     assert [s.id for s in r.sources] == ["a", "p9_chunk_0"]
+
+
+def _d_tr(route: str, q: str, translated: str) -> RouteDecision:
+    return RouteDecision(q, route, False, translated)  # type: ignore[arg-type]
+
+
+async def test_chunks_route_also_searches_translated_query(tmp_path: Path) -> None:
+    rag = _source("rag", [])
+    rag.search = AsyncMock(
+        side_effect=lambda q, ctx: (
+            [SearchResult("p1_chunk_0", "pH y cloro", "url-1", "bajar pH", 3.0)]
+            if q == "bajar pH" and ctx.query_vec is None
+            else []
+        )
+    )
+    coord, _, _, _ = _build(tmp_path, [_d_tr("chunks", "lower pH", "bajar pH")], [rag])
+
+    r = await coord.query("lower pH")
+
+    assert [c.args[0] for c in rag.search.await_args_list] == ["lower pH", "bajar pH"]
+    assert [s.title for s in r.sources] == ["pH y cloro"]
+    assert r.tool_calls_used == 1
+
+
+async def test_translated_results_merge_best_score_first(tmp_path: Path) -> None:
+    by_query = {
+        "en": [SearchResult("a_chunk_0", "A", "ua", "x", 1.0)],
+        "es": [
+            SearchResult("b_chunk_0", "B", "ub", "y", 5.0),
+            SearchResult("a_chunk_0", "A", "ua", "x", 2.0),
+        ],
+    }
+    rag = _source("rag", [])
+    rag.search = AsyncMock(side_effect=lambda q, ctx: by_query[q])
+    coord, _, _, _ = _build(tmp_path, [_d_tr("chunks", "en", "es")], [rag])
+
+    r = await coord.query("en")
+
+    assert [(s.id, s.score) for s in r.sources] == [
+        ("b_chunk_0", 5.0),
+        ("a_chunk_0", 2.0),
+    ]
+
+
+async def test_web_source_never_gets_translated_query(tmp_path: Path) -> None:
+    web = _source("web", [_sr("w")])
+    coord, _, _, _ = _build(tmp_path, [_d_tr("chunks", "en", "es")], [web])
+
+    await coord.query("en", use_web=True)
+
+    assert [c.args[0] for c in web.search.await_args_list] == ["en"]
+
+
+async def test_cache_checked_before_router(tmp_path: Path) -> None:
+    cached = QueryResult("cached", [], 0, 1.0, route="catalog")
+    cache = MagicMock()
+    cache.get = AsyncMock(return_value=cached)
+    cache.set = AsyncMock()
+    coord, llm, _, embed = _build(tmp_path, [_d("chunks")], cache=cache)
+
+    r = await coord.query("list")
+
+    assert r.answer == "cached" and r.route == "catalog"
+    assert cast(Any, coord)._router.calls == []
+    llm.chat.assert_not_called()
+    embed.embed.assert_awaited_once_with("list")
+
+
+async def test_cache_miss_embeds_once_then_routes(tmp_path: Path) -> None:
+    cache = MagicMock()
+    cache.get = AsyncMock(return_value=None)
+    cache.set = AsyncMock()
+    rag = _source("rag", [_sr("p1_chunk_0")])
+    coord, _, _, embed = _build(tmp_path, [_d("chunks", "list")], [rag], cache=cache)
+
+    await coord.query("list")
+
+    assert len(cast(Any, coord)._router.calls) == 1
+    embed.embed.assert_awaited_once_with("list")
+    cache.set.assert_awaited_once()

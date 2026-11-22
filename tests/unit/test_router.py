@@ -131,3 +131,38 @@ async def test_route_requests_json_output() -> None:
     )
     await QueryRouter(llm, 3).route("q", [], [])
     assert llm.json_flags == [True]
+
+
+def test_parse_route_reads_translated_query() -> None:
+    text = (
+        '{"standalone_query": "lower pool pH", "translated_query": "bajar pH piscina",'
+        ' "route": "chunks", "focus_previous": false}'
+    )
+    assert parse_route(text, "q").translated_query == "bajar pH piscina"
+
+
+@pytest.mark.parametrize("value", ['""', "3", '"Lower Pool pH"'])
+def test_parse_route_drops_useless_translation(value: str) -> None:
+    text = (
+        f'{{"standalone_query": "lower pool pH", "translated_query": {value},'
+        ' "route": "chunks", "focus_previous": false}'
+    )
+    assert parse_route(text, "q").translated_query is None
+
+
+def test_build_router_prompt_asks_for_translation() -> None:
+    assert "translated_query" in build_router_prompt("q", [], [], 3)
+
+
+async def test_router_without_history_keeps_translation() -> None:
+    reply = (
+        '{"standalone_query": "x", "translated_query": "y", "route": "chunks",'
+        ' "focus_previous": false}'
+    )
+    d = await QueryRouter(StubLLM(reply), 3).route("orig", [], [])
+    assert d == RouteDecision("orig", "chunks", False, "y")
+
+
+def test_build_router_prompt_keeps_question_language() -> None:
+    # A Spanish follow-up rewritten into English loses its Spanish matches.
+    assert "same language as the new question" in build_router_prompt("q", [], [], 3)
