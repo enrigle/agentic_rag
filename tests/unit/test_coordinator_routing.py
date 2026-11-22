@@ -7,7 +7,11 @@ from unittest.mock import AsyncMock, MagicMock
 from agentic_rag.catalog.store import CardStore, PageCard
 from agentic_rag.config import CatalogConfig
 from agentic_rag.models import QueryResult, SearchResult
-from agentic_rag.pipeline.coordinator import PipelineCoordinator, page_ids_from_sources
+from agentic_rag.pipeline.coordinator import (
+    PipelineCoordinator,
+    merge_by_source,
+    page_ids_from_sources,
+)
 from agentic_rag.pipeline.memory import ConversationMemory
 from agentic_rag.pipeline.router import RouteDecision
 from agentic_rag.pipeline.synthesizer import Synthesizer
@@ -252,3 +256,78 @@ def test_page_ids_from_sources_strips_chunk_suffix() -> None:
         SearchResult("p2", "B", "u", "c", 1.0),
     ]
     assert page_ids_from_sources(srcs) == ["p1", "p2"]
+
+
+def test_merge_by_source_joins_chunks_of_one_page_in_first_seen_order() -> None:
+    results = [
+        SearchResult("p1_chunk_4", "A", "url-a", "four", 0.9, 0.8),
+        SearchResult("p2_chunk_0", "B", "url-b", "bee", 0.7),
+        SearchResult("p1_chunk_1", "A", "url-a", "one", 0.5),
+    ]
+
+    merged = merge_by_source(results)
+
+    assert merged == [
+        SearchResult("p1_chunk_4", "A", "url-a", "four\n\none", 0.9, 0.8),
+        SearchResult("p2_chunk_0", "B", "url-b", "bee", 0.7),
+    ]
+    assert results[0].content == "four"  # input not mutated
+
+
+async def test_chunks_route_gives_one_source_per_page_with_all_chunks(
+    tmp_path: Path,
+) -> None:
+    rag = _source(
+        "rag",
+        [
+            SearchResult("p1_chunk_3", "Page One", "url-1", "alpha", 1.0),
+            SearchResult("p1_chunk_0", "Page One", "url-1", "tree index", 0.9),
+            SearchResult("p2_chunk_0", "Page Two", "url-2", "beta", 0.8),
+        ],
+    )
+    coord, llm, fetcher, _ = _build(
+        tmp_path, [_d("chunks"), _d("chunks", focus=True)], [rag]
+    )
+
+    r = await coord.query("q")
+
+    assert [s.source for s in r.sources] == ["url-1", "url-2"]
+    prompt = llm.chat.call_args.args[0]
+    assert "alpha" in prompt and "tree index" in prompt
+    assert "[2] Page Two" in prompt and "[3]" not in prompt
+
+    # The follow-up must know the page title even when chunk_0 was not first.
+    await coord.query("summarize it")
+    assert cast(Any, coord)._router.calls[1][1] == [
+        ("p1", "Page One"),
+        ("p2", "Page Two"),
+    ]
+
+
+async def test_focus_previous_gives_one_source_per_page(tmp_path: Path) -> None:
+    rag = _source("rag", [_sr("p1_chunk_0", "Page One")])
+    coord, _, fetcher, _ = _build(
+        tmp_path, [_d("chunks"), _d("chunks", focus=True)], [rag]
+    )
+    fetcher.fetch_by_page_ids = AsyncMock(
+        return_value=[
+            SearchResult("p1_chunk_0", "Page One", "url-1", "a", 1.0),
+            SearchResult("p1_chunk_1", "Page One", "url-1", "b", 1.0),
+        ]
+    )
+    await coord.query("first")
+
+    r = await coord.query("summarize it")
+
+    assert [s.source for s in r.sources] == ["url-1"]
+    assert r.sources[0].content == "a\n\nb"
+
+
+async def test_both_route_does_not_list_a_cited_card_page_twice(tmp_path: Path) -> None:
+    rag = _source("rag", [_sr("a_chunk_2", "A"), _sr("p9_chunk_0", "Chunky")])
+    rag.search.return_value[1].source = "url-9"
+    coord, _, _, _ = _build(tmp_path, [_d("both")], [rag], cards=[_card("a", "A")])
+
+    r = await coord.query("what do I know")
+
+    assert [s.id for s in r.sources] == ["a", "p9_chunk_0"]

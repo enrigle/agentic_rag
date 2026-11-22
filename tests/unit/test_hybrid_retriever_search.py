@@ -92,42 +92,21 @@ async def test_hybrid_search_returns_empty_when_no_vector_results() -> None:
 
 
 @pytest.mark.asyncio
-async def test_hybrid_search_deduplicates_by_source() -> None:
-    """Multiple chunks from the same page must collapse to one result."""
+async def test_hybrid_search_keeps_all_chunks_of_one_page() -> None:
+    """Chunks of one page must all reach the reranker; pages merge later."""
     cfg = RAGConfig(retriever=RetrieverConfig(top_n=5, bm25_top_k=10, rrf_k=60))
 
     same_source = "https://notion.so/mypage"
     vector_store = MagicMock()
     vector_store.search = AsyncMock(
         return_value=[
+            SearchResult(f"page1_chunk_{i}", "Page", same_source, f"chunk {i}", 0.9)
+            for i in range(3)
+        ]
+        + [
             SearchResult(
-                id="page1_chunk_0",
-                title="Page",
-                source=same_source,
-                content="chunk 0",
-                score=0.9,
-            ),
-            SearchResult(
-                id="page1_chunk_1",
-                title="Page",
-                source=same_source,
-                content="chunk 1",
-                score=0.85,
-            ),
-            SearchResult(
-                id="page1_chunk_2",
-                title="Page",
-                source=same_source,
-                content="chunk 2",
-                score=0.8,
-            ),
-            SearchResult(
-                id="page2_chunk_0",
-                title="Other",
-                source="https://notion.so/otherpage",
-                content="other",
-                score=0.7,
-            ),
+                "page2_chunk_0", "Other", "https://notion.so/otherpage", "other", 0.7
+            )
         ]
     )
     vector_store.fetch_by_ids = AsyncMock(return_value=[])
@@ -138,12 +117,12 @@ async def test_hybrid_search_deduplicates_by_source() -> None:
     retriever = HybridRetriever(vector_store, keyword, cfg)
     results = await retriever.search([0.1, 0.2], "query")
 
-    sources = [r.source for r in results]
-    assert sources.count(same_source) == 1
-    assert len(results) == 2
-    # The surviving chunk from the duplicate page should be the highest-ranked one
-    dup_result = next(r for r in results if r.source == same_source)
-    assert dup_result.id == "page1_chunk_0"
+    assert [r.id for r in results] == [
+        "page1_chunk_0",
+        "page1_chunk_1",
+        "page1_chunk_2",
+        "page2_chunk_0",
+    ]
 
 
 @pytest.mark.asyncio

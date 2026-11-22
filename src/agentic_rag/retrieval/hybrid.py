@@ -95,7 +95,6 @@ class HybridRetriever:
             return []
 
         await self._fill_vector_data(merged_ids, vector_data)
-        merged_ids = self._deduplicate_by_source(merged_ids, vector_data)
         final = self._build_results(merged_ids, vector_data, rrf_scores)
 
         logger.info(
@@ -115,19 +114,6 @@ class HybridRetriever:
         if missing:
             for result in await self._vector_store.fetch_by_ids(missing):
                 vector_data[result.id] = result
-
-    def _deduplicate_by_source(
-        self,
-        merged_ids: list[str],
-        vector_data: dict[str, SearchResult],
-    ) -> list[str]:
-        seen: set[str] = set()
-        deduped: list[str] = []
-        for fid in merged_ids:
-            if fid in vector_data and vector_data[fid].source not in seen:
-                seen.add(vector_data[fid].source)
-                deduped.append(fid)
-        return deduped
 
     def _build_results(
         self,
