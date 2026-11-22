@@ -193,12 +193,26 @@
   {
     "id": "qa-pageindex",
     "query": "what is PageIndex in vectorless RAG?",
-    "expected_route": "chunks",
+    "expected_route": [
+      "chunks",
+      "both"
+    ],
     "expected_pages": [
       "Vectorless RAG"
     ],
     "expected_keywords": [
       "tree"
+    ]
+  },
+  {
+    "id": "xlang-pool-ph",
+    "query": "how do I lower the pH of my swimming pool?",
+    "expected_route": [
+      "chunks",
+      "both"
+    ],
+    "expected_pages": [
+      "pH y cloro "
     ]
   }
 ]
