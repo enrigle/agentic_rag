@@ -413,3 +413,37 @@ async def test_cache_miss_embeds_once_then_routes(tmp_path: Path) -> None:
     assert len(cast(Any, coord)._router.calls) == 1
     embed.embed.assert_awaited_once_with("list")
     cache.set.assert_awaited_once()
+
+
+async def test_last_pages_keeps_at_most_max_threads(tmp_path: Path) -> None:
+    rag = _source("rag", [_sr("p1_chunk_0")])
+    coord, _, _, _ = _build(tmp_path, [_d("chunks")], [rag])
+    for i in range(ConversationMemory.MAX_THREADS + 1):
+        await coord.query("q", thread_id=f"t{i}")
+    pages = cast(Any, coord)._last_pages
+    assert len(pages) == ConversationMemory.MAX_THREADS
+    assert "t0" not in pages
+
+
+async def test_both_route_single_cited_page_has_no_incomplete_note(
+    tmp_path: Path,
+) -> None:
+    rag = _source("rag", [_sr("p9_chunk_0", "Chunky")])
+    coord, _, _, _ = _build(
+        tmp_path, [_d("both")], [rag], cards=[_card("a", "A"), _card("b", "B")]
+    )
+    r = await coord.query("what is A?")
+    assert "may be incomplete" not in r.answer
+
+
+async def test_both_route_list_keeps_incomplete_note(tmp_path: Path) -> None:
+    rag = _source("rag", [_sr("p9_chunk_0", "Chunky")])
+    coord, _, _, _ = _build(
+        tmp_path,
+        [_d("both")],
+        [rag],
+        cards=[_card("a", "A"), _card("b", "B")],
+        answer="A [1] and B [2]",
+    )
+    r = await coord.query("what do I know")
+    assert r.answer.endswith("Found 2 pages; this list may be incomplete.")

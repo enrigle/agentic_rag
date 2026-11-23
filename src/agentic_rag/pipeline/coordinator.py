@@ -209,6 +209,8 @@ class PipelineCoordinator:
         self._last_pages[thread_id] = [
             (pid, titles[pid]) for pid in page_ids_from_sources(sources)
         ]
+        if len(self._last_pages) > ConversationMemory.MAX_THREADS:
+            del self._last_pages[next(iter(self._last_pages))]
 
     def _select_cards(self, ctx: PipelineContext) -> list[PageCard]:
         if self._card_store is None:
@@ -338,4 +340,7 @@ class PipelineCoordinator:
         # A page already listed as a card must not appear again as a chunk source.
         listed = {s.id for s in card_sources}
         extra = [c for c in chunks if _CHUNK_SUFFIX.sub("", c.id) not in listed]
-        return ensure_incomplete_note(answer, len(cited)), card_sources + extra
+        # The note warns that a list may miss pages; one cited page is no list.
+        if len(cited) > 1:
+            answer = ensure_incomplete_note(answer, len(cited))
+        return answer, card_sources + extra

@@ -78,3 +78,11 @@ def test_most_recent_messages_kept(memory: ConversationMemory) -> None:
     history = memory.get("t1")
     last_q = f"q{many - 1}"
     assert any(m.content == last_q for m in history)
+
+
+def test_memory_drops_oldest_thread_past_cap() -> None:
+    mem = ConversationMemory()
+    for i in range(ConversationMemory.MAX_THREADS + 1):
+        mem.append(f"t{i}", "q", "a")
+    assert mem.get("t0") == []
+    assert mem.get(f"t{ConversationMemory.MAX_THREADS}") != []

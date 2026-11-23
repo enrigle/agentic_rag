@@ -148,8 +148,9 @@ async def test_azure_json_output_has_no_reasoning_effort(llm: AzureOpenAILLM) ->
     assert "reasoning_effort" not in create.await_args.kwargs
 
 
-async def test_groq_json_output_uses_low_reasoning_effort() -> None:
-    # gpt-oss on Groq can spend its whole reply on reasoning and return empty JSON.
+async def test_groq_uses_low_reasoning_effort_on_every_call() -> None:
+    # gpt-oss on Groq can spend its whole 2048-token reply on reasoning and
+    # return empty content, in JSON mode and in plain answers alike.
     with patch("agentic_rag.llm.openai_compat.openai.AsyncOpenAI") as mock_cls:
         groq = GroqLLM(GroqConfig(api_key="k", model="openai/gpt-oss-20b"))
     create = AsyncMock(return_value=_make_completion("{}"))
@@ -158,5 +159,7 @@ async def test_groq_json_output_uses_low_reasoning_effort() -> None:
     await groq.chat("p", json_output=True)
     await groq.chat("p")
 
-    assert create.await_args_list[0].kwargs["reasoning_effort"] == "low"
-    assert "reasoning_effort" not in create.await_args_list[1].kwargs
+    assert [c.kwargs["reasoning_effort"] for c in create.await_args_list] == [
+        "low",
+        "low",
+    ]
