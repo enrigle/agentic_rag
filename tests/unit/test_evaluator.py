@@ -228,3 +228,14 @@ async def test_run_auto_zero_delay_does_not_sleep(tmp_path: Path) -> None:
         evaluator._pipeline = pipeline
         await evaluator.run_auto(delay_seconds=0)
     sleep.assert_not_awaited()
+
+
+def test_check_item_accepts_any_route_in_list() -> None:
+    item = _item(expected_route=["chunks", "both"])
+    assert ev.check_item(item, _result(route="both")) == []
+    assert ev.check_item(item, _result(route="catalog"))
+
+
+def test_eval_item_rejects_bad_expected_route() -> None:
+    with pytest.raises(ValueError, match="expected_route"):
+        _item(expected_route=["chunks", 3])

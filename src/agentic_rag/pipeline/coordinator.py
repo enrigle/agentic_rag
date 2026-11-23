@@ -54,6 +54,15 @@ def merge_by_source(results: list[SearchResult]) -> list[SearchResult]:
     return list(merged.values())
 
 
+def best_unique(results: list[SearchResult], top_k: int) -> list[SearchResult]:
+    """Highest-scored result per id, best first, at most *top_k*."""
+    best: dict[str, SearchResult] = {}
+    for r in results:
+        if r.id not in best or r.score > best[r.id].score:
+            best[r.id] = r
+    return sorted(best.values(), key=lambda r: r.score, reverse=True)[:top_k]
+
+
 class PipelineCoordinator:
     def __init__(
         self,
@@ -96,34 +105,32 @@ class PipelineCoordinator:
 
         chat_history = self._memory.get(thread_id)
         previous = self._last_pages.get(thread_id, [])
-        if self._router is None:
-            decision = RouteDecision(user_query, "chunks", False)
-        else:
-            decision = await self._router.route(user_query, chat_history, previous)
-
-        # Embed once; reused by the cache lookup, retrieval, and cache store.
-        # On failure, leave None — downstream falls back to embedding itself.
-        query_vec: list[float] | None = None
-        try:
-            query_vec = await self._embed_llm.embed(decision.standalone_query)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "embed() failed up front (%s); cache skipped, retrieval will retry",
-                exc,
-            )
 
         # The cache key is the query alone, so only stand-alone questions are
         # safe to share: a follow-up's meaning depends on this thread's history.
         # Web results are live, so they never go through the cache either.
         cache = None if chat_history or use_web else self._cache
 
+        # Embed once; reused by the cache lookup, retrieval, and cache store.
+        # On failure, leave None — downstream falls back to embedding itself.
+        query_vec: list[float] | None = None
         if cache is not None:
+            # Check the cache before the router: a hit costs no LLM call. Without
+            # history the router keeps the query as is, so this vector stays valid.
+            query_vec = await self._embed_or_none(user_query)
             cached = await cache.get(user_query, query_vec)
             if cached is not None:
                 logger.debug("cache hit for query len=%d", len(user_query))
                 self._memory.append(thread_id, user_query, cached.answer)
                 self._remember_pages(thread_id, cached.sources)
-                return dataclasses.replace(cached, route=decision.route)
+                return cached
+
+        if self._router is None:
+            decision = RouteDecision(user_query, "chunks", False)
+        else:
+            decision = await self._router.route(user_query, chat_history, previous)
+        if cache is None:
+            query_vec = await self._embed_or_none(decision.standalone_query)
 
         t0 = time.monotonic()
         ctx = PipelineContext(
@@ -187,6 +194,16 @@ class PipelineCoordinator:
 
         return result
 
+    async def _embed_or_none(self, text: str) -> list[float] | None:
+        try:
+            return await self._embed_llm.embed(text)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "embed() failed up front (%s); cache skipped, retrieval will retry",
+                exc,
+            )
+            return None
+
     def _remember_pages(self, thread_id: str, sources: list[SearchResult]) -> None:
         titles = {_CHUNK_SUFFIX.sub("", s.id): s.title for s in sources}
         self._last_pages[thread_id] = [
@@ -204,27 +221,27 @@ class PipelineCoordinator:
         )
 
     async def _search_sources(
-        self, query: str, ctx: PipelineContext, sources: list[BaseSource]
+        self, decision: RouteDecision, ctx: PipelineContext, sources: list[BaseSource]
     ) -> None:
-        """Run sources in order; the first with relevant results fills ctx.results."""
+        """Run sources in order; the first with relevant results fills ctx.results.
+
+        KB sources also search the translated query, so an English question
+        finds Spanish pages (and the reverse). Web gets the original only.
+        """
         for source in sources:
             if ctx.tool_calls >= ctx.max_tool_calls:
                 logger.warning("Circuit breaker: max tool calls reached")
                 break
-            new_results = await source.search(query, ctx)
+            relevant = await self._search_one(decision.standalone_query, ctx, source)
+            if source.gated and decision.translated_query:
+                # ctx.query_vec belongs to the original query: embed anew.
+                other = dataclasses.replace(ctx, query_vec=None)
+                relevant = best_unique(
+                    relevant
+                    + await self._search_one(decision.translated_query, other, source),
+                    self._reranker.top_k,
+                )
             ctx.tool_calls += 1
-            # Rerank per source: the cross-encoder relevance gate can
-            # empty the list, letting off-topic queries fall through
-            # to the next source (e.g. web) instead of stopping here.
-            # The gate is KB-calibrated, so honor it only for sources
-            # that opt in (source.gated). Ungated sources (web) reorder
-            # without dropping — their scores aren't on the KB scale and
-            # they have no fallback. Keyed on the source, not position.
-            relevant = self._reranker.rerank(
-                query,
-                new_results,
-                min_score=_USE_CONFIGURED if source.gated else None,
-            )
             if relevant:
                 logger.info(
                     "%s: %d relevant results, stopping", source.name, len(relevant)
@@ -232,6 +249,23 @@ class PipelineCoordinator:
                 ctx.results = merge_by_source(relevant)
                 break
             logger.info("%s: no relevant results, falling through", source.name)
+
+    async def _search_one(
+        self, query: str, ctx: PipelineContext, source: BaseSource
+    ) -> list[SearchResult]:
+        new_results = await source.search(query, ctx)
+        # Rerank per source: the cross-encoder relevance gate can
+        # empty the list, letting off-topic queries fall through
+        # to the next source (e.g. web) instead of stopping here.
+        # The gate is KB-calibrated, so honor it only for sources
+        # that opt in (source.gated). Ungated sources (web) reorder
+        # without dropping — their scores aren't on the KB scale and
+        # they have no fallback. Keyed on the source, not position.
+        return self._reranker.rerank(
+            query,
+            new_results,
+            min_score=_USE_CONFIGURED if source.gated else None,
+        )
 
     async def _run_chunks(
         self,
@@ -254,7 +288,7 @@ class PipelineCoordinator:
                 for s in self._sources
                 if use_web or s.name != "web" or self._router is None
             ]
-            await self._search_sources(decision.standalone_query, ctx, sources)
+            await self._search_sources(decision, ctx, sources)
         answer = await self._synthesizer.synthesize(user_query, ctx)
         return answer, list(ctx.results)
 
@@ -288,11 +322,11 @@ class PipelineCoordinator:
     ) -> tuple[str, list[SearchResult]]:
         cards = self._select_cards(ctx)
         rag = [s for s in self._sources if s.name == "rag"]
-        await self._search_sources(decision.standalone_query, ctx, rag)
+        await self._search_sources(decision, ctx, rag)
         chunks = list(ctx.results)
         if not cards and not chunks and use_web:
             web = [s for s in self._sources if s.name == "web"]
-            await self._search_sources(decision.standalone_query, ctx, web)
+            await self._search_sources(decision, ctx, web)
             chunks = list(ctx.results)
         if not cards:
             return await self._synthesizer.synthesize(user_query, ctx), chunks

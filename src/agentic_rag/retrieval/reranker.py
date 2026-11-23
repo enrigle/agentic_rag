@@ -40,6 +40,10 @@ class CrossEncoderReranker:
         self._top_k = top_k
         self._min_score = min_score
 
+    @property
+    def top_k(self) -> int:
+        return self._top_k
+
     def rerank(
         self,
         query: str,

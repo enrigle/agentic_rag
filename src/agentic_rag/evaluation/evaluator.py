@@ -50,7 +50,7 @@ class EvalItem:
     id: str
     query: str
     history: list[ChatMessage]
-    expected_route: str | None
+    expected_route: list[str] | None  # any of these routes passes
     expected_pages: list[str]
     forbidden_pages: list[str]
     expected_answer_start: str | None
@@ -78,11 +78,19 @@ def eval_item_from_dict(raw: dict[str, Any]) -> EvalItem:
         raise ValueError("eval item needs a non-empty string 'id'")
     if not isinstance(query, str) or not query:
         raise ValueError(f"eval item {item_id!r} needs a non-empty string 'query'")
+    route = raw.get("expected_route")
+    routes = [route] if isinstance(route, str) else route
+    if routes is not None and not (
+        isinstance(routes, list) and all(isinstance(r, str) for r in routes)
+    ):
+        raise ValueError(
+            f"eval item {item_id!r}: 'expected_route' must be a string or list of strings"
+        )
     return EvalItem(
         id=item_id,
         query=query,
         history=_parse_history(raw.get("history", [])),
-        expected_route=raw.get("expected_route"),
+        expected_route=routes,
         expected_pages=list(raw.get("expected_pages", [])),
         forbidden_pages=list(raw.get("forbidden_pages", [])),
         expected_answer_start=raw.get("expected_answer_start"),
@@ -109,8 +117,8 @@ def check_item(item: EvalItem, result: QueryResult) -> list[str]:
     failures: list[str] = []
     titles = [s.title for s in result.sources]
     answer = normalize_text(result.answer.strip())
-    if item.expected_route is not None and result.route != item.expected_route:
-        failures.append(f"route {result.route!r} != {item.expected_route!r}")
+    if item.expected_route is not None and result.route not in item.expected_route:
+        failures.append(f"route {result.route!r} not in {item.expected_route!r}")
     failures += [f"missing page {t!r}" for t in item.expected_pages if t not in titles]
     failures += [
         f"forbidden page {t!r} cited" for t in item.forbidden_pages if t in titles
