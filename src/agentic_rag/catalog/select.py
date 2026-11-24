@@ -133,12 +133,36 @@ def cited_card_indices(answer: str, cards: list[PageCard]) -> list[int]:
     if cited:
         return cited
     low = answer.lower()
-    return [
+    named = [
         i
         for i, c in enumerate(cards, 1)
         if c.url in answer
         or (len(c.title.strip()) >= 4 and c.title.strip().lower() in low)
     ]
+    return named or best_item_matches(low, cards)
+
+
+_MIN_ITEM_LEN = 3
+_MIN_ITEM_MATCHES = 3
+
+
+def best_item_matches(answer_lower: str, cards: list[PageCard]) -> list[int]:
+    """Cards whose listed items the answer repeats most (>= 3 items), as 1-based indices.
+
+    Last resort when the model lists a page's items but cites nothing.
+    """
+    counts = [
+        sum(
+            1
+            for item in c.items
+            if len(item) >= _MIN_ITEM_LEN and item.lower() in answer_lower
+        )
+        for c in cards
+    ]
+    best = max(counts, default=0)
+    if best < _MIN_ITEM_MATCHES:
+        return []
+    return [i for i, n in enumerate(counts, 1) if n == best]
 
 
 def cards_to_sources(cards: list[PageCard], cited: list[int]) -> list[SearchResult]:

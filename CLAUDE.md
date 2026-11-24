@@ -22,6 +22,7 @@ uv run python scripts/main.py "your question"
 # Evaluate
 uv run python scripts/eval.py
 uv run python scripts/eval.py --report
+uv run python scripts/eval.py --auto      # automated pass/fail checks; exit 1 on any fail
 
 # Lint & format
 ruff format . && ruff check . --fix
@@ -38,3 +39,4 @@ pytest -x
 - [Ollama](https://ollama.com) installed and running: `ollama serve`
 - Models pulled: `ollama pull llama3.2 && ollama pull nomic-embed-text`
 - `NOTION_TOKEN` env var set (see `.env.example`)
+- `GROQ_API_KEY` env var set: answers are synthesized by Groq (`openai/gpt-oss-20b`, free tier)

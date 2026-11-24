@@ -24,11 +24,13 @@ class OpenAICompatLLM:
         model: str,
         provider: str,
         json_extra: dict[str, Any] | None = None,
+        chat_extra: dict[str, Any] | None = None,
     ) -> None:
         self._client = client
         self._model = model
         self._provider = provider
         self._json_extra = json_extra or {}
+        self._chat_extra = chat_extra or {}
         logger.debug("%s initialised: model=%s", provider, model)
 
     async def chat(self, prompt: str, *, json_output: bool = False) -> str:
@@ -40,11 +42,9 @@ class OpenAICompatLLM:
             self._model,
             len(prompt),
         )
-        extra: dict[str, Any] = (
-            {"response_format": {"type": "json_object"}, **self._json_extra}
-            if json_output
-            else {}
-        )
+        extra: dict[str, Any] = dict(self._chat_extra)
+        if json_output:
+            extra |= {"response_format": {"type": "json_object"}, **self._json_extra}
         try:
             response = await self._client.chat.completions.create(
                 model=self._model,
@@ -102,6 +102,7 @@ class GroqLLM(OpenAICompatLLM):
             ),
             model=config.model,
             provider="Groq",
-            # gpt-oss: default reasoning can use the whole reply and leave empty JSON.
-            json_extra={"reasoning_effort": "low"},
+            # gpt-oss: Groq caps a reply at 2048 tokens; default reasoning can use
+            # all of them and leave empty content (JSON or plain answer).
+            chat_extra={"reasoning_effort": "low"},
         )

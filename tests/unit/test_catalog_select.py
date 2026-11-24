@@ -179,3 +179,29 @@ def test_cited_card_indices_falls_back_to_title_case_insensitive() -> None:
 def test_cited_card_indices_ignores_short_title() -> None:
     cards = [_titled("a", "RAG")]
     assert cited_card_indices("about rag here", cards) == []
+
+
+def _with_items(pid: str, items: list[str]) -> PageCard:
+    c = _titled(pid, f"Page {pid}")
+    c.items = items
+    return c
+
+
+def test_cited_card_indices_falls_back_to_best_item_match() -> None:
+    # The model listed the items but forgot "[1]": still cite the page they came from.
+    cards = [
+        _with_items("a", ["/plan", "/compact", "/rewind", "/help"]),
+        _with_items("b", ["/compact", "/other"]),
+    ]
+    answer = "Your commands: /plan, /compact, /rewind and /help."
+    assert cited_card_indices(answer, cards) == [1]
+
+
+def test_cited_card_indices_needs_three_item_matches() -> None:
+    cards = [_with_items("a", ["/plan", "/compact", "/rewind"])]
+    assert cited_card_indices("Use /plan or /compact.", cards) == []
+
+
+def test_cited_card_indices_ignores_short_items() -> None:
+    cards = [_with_items("a", ["ai", "ml", "go", "/plan"])]
+    assert cited_card_indices("ai ml go /plan", cards) == []
